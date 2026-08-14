@@ -4,7 +4,7 @@ import { authenticateToken } from '../middleware/auth';
 
 const router = Router();
 
-router.use(authenticateToken as any);
+router.use(authenticateToken);
 
 router.post('/start', (req, res) => InterviewController.startInterview(req, res));
 router.get('/:id', (req, res) => InterviewController.getSessionDetails(req, res));
@@ -14,4 +14,5 @@ router.post('/:id/finish', (req, res) => InterviewController.finishInterview(req
 router.get('/:id/feedback', (req, res) => InterviewController.getFeedback(req, res));
 
 export default router;
+
 

@@ -4,12 +4,23 @@ import crypto from 'crypto';
 import { env } from '../config/env';
 import { db } from '../config/db';
 
+export interface AuthenticatedUser {
+  id: number;
+  email: string;
+  name: string;
+}
+
+declare global {
+  namespace Express {
+    interface Request {
+      user?: AuthenticatedUser;
+      rawToken?: string;
+    }
+  }
+}
+
 export interface AuthenticatedRequest extends Request {
-  user?: {
-    id: number;
-    email: string;
-    name: string;
-  };
+  user?: AuthenticatedUser;
   rawToken?: string;
 }
 
@@ -17,7 +28,7 @@ export function hashToken(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
 
-export function authenticateToken(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+export function authenticateToken(req: Request, res: Response, next: NextFunction): void | Response {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
 
@@ -47,7 +58,7 @@ export function authenticateToken(req: AuthenticatedRequest, res: Response, next
     }
 
     // Verify user exists in database
-    const user = db.prepare('SELECT id, email, name FROM users WHERE id = ?').get(decoded.id) as { id: number; email: string; name: string } | undefined;
+    const user = db.prepare('SELECT id, email, name FROM users WHERE id = ?').get(decoded.id) as AuthenticatedUser | undefined;
     
     if (!user) {
       return res.status(401).json({ error: 'User account not found or deactivated.' });
@@ -55,12 +66,13 @@ export function authenticateToken(req: AuthenticatedRequest, res: Response, next
 
     req.user = user;
     req.rawToken = token;
-    next();
-  } catch (err: any) {
-    if (err.name === 'TokenExpiredError') {
+    return next();
+  } catch (err: unknown) {
+    if (err && typeof err === 'object' && 'name' in err && (err as { name: string }).name === 'TokenExpiredError') {
       return res.status(401).json({ error: 'Your session has expired. Please sign in again.' });
     }
     return res.status(403).json({ error: 'Invalid authentication token.' });
   }
 }
+
 
