@@ -9,9 +9,15 @@ build/
 
 # Environment files
 .env
-.env.*
+.env.local
+.env.*.local
 client/.env
+client/.env.local
 server/.env
+!.env.example
+!client/.env.example
+!client/.env.production
+!client/.env.development
 
 # Database
 *.db

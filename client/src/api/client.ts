@@ -1,6 +1,10 @@
 import axios from 'axios';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ||
+  (import.meta.env.PROD
+    ? 'https://interviewai-uw2m.onrender.com/api'
+    : '/api');
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
