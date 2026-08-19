@@ -359,12 +359,12 @@ export function exportInterviewPDF(session: InterviewSession) {
           ${item.category ? `<span style="font-size: 10px; color: #64748b; margin-left: auto;">[${item.category}]</span>` : ''}
         </div>
         <div class="user-ans">
-          <div style="font-size: 10px; font-weight: 700; color: #4f46e5; text-transform: uppercase; margin-bottom: 2px;">Candidate Response:</div>
+          <div style="font-size: 10px; font-weight: 700; color: #4f46e5; text-transform: uppercase; margin-bottom: 2px;">Candidate Actual Response:</div>
           ${item.answer_text}
         </div>
         ${matchedSuggestion ? `
           <div class="model-ans">
-            <div style="font-size: 10px; font-weight: 700; color: #059669; text-transform: uppercase; margin-bottom: 2px;">Suggested Ideal Answer:</div>
+            <div style="font-size: 10px; font-weight: 700; color: #059669; text-transform: uppercase; margin-bottom: 2px;">Suggested Improved Answer:</div>
             ${matchedSuggestion.suggestedAnswer}
           </div>
         ` : ''}

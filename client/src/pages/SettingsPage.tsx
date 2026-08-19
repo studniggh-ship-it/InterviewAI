@@ -276,7 +276,7 @@ export const SettingsPage: React.FC = () => {
                 </div>
                 <div>
                   <div className="text-sm font-bold text-white">Application Language</div>
-                  <div className="text-xs text-slate-400">Interface and Gemini AI prompts response language</div>
+                  <div className="text-xs text-slate-400">Interface and AI interview prompts response language</div>
                 </div>
               </div>
 
@@ -352,7 +352,7 @@ export const SettingsPage: React.FC = () => {
       {/* Interactive Information Modals */}
       {activeModal && (
         <div className="fixed inset-0 z-50 backdrop-blur-md bg-black/60 flex items-center justify-center p-4">
-          <GlassCard className="max-w-lg w-full p-6 space-y-4 max-h-[85vh] overflow-y-auto">
+          <GlassCard className="max-w-2xl w-full p-6 space-y-4 max-h-[88vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-white/10 pb-3">
               <h3 className="text-base font-bold text-white flex items-center gap-2">
                 {activeModal === 'privacy' && <ShieldCheck className="w-5 h-5 text-emerald-400" />}
@@ -370,7 +370,7 @@ export const SettingsPage: React.FC = () => {
               </button>
             </div>
 
-            <div className="text-xs text-slate-300 space-y-3 leading-relaxed">
+            <div className="text-xs text-slate-300 space-y-4 leading-relaxed">
               {activeModal === 'privacy' && (
                 <>
                   <p>
@@ -380,7 +380,7 @@ export const SettingsPage: React.FC = () => {
                     Your authentication credentials are encrypted using industry-standard bcrypt hashing. SQLite database stores all session history and metrics locally in your dedicated user profile.
                   </p>
                   <p>
-                    We do not sell candidate data or resume contents to third parties. All text transmissions to Gemini API use authenticated HTTPS transport.
+                    We do not sell candidate data or resume contents to third parties. All text transmissions use authenticated HTTPS transport.
                   </p>
                 </>
               )}
@@ -400,20 +400,104 @@ export const SettingsPage: React.FC = () => {
               )}
 
               {activeModal === 'about' && (
-                <>
-                  <p>
-                    <strong>InterviewAI Platform v2.0:</strong> Next-generation AI-powered interview practice platform built for software engineers, data professionals, and tech candidates.
-                  </p>
-                  <div className="p-3 rounded-xl bg-slate-900/60 border border-white/5 space-y-1 font-mono text-[11px] text-slate-400">
-                    <div>• Engine: Gemini 2.5 Flash API</div>
-                    <div>• Database: SQLite (WAL Mode, High Concurrency)</div>
-                    <div>• Stack: React 18, TypeScript, Express, TailwindCSS</div>
-                    <div>• Speech: Web Speech Synthesis & Recognition API</div>
+                <div className="space-y-4">
+                  <div className="p-3.5 rounded-xl bg-brand-950/40 border border-brand-500/20 text-slate-200">
+                    <p className="text-xs leading-relaxed">
+                      <strong>InterviewAI</strong> is an AI-powered technical interview practice platform developed by <strong className="text-white">Gesha Morphic</strong>.
+                    </p>
                   </div>
-                  <p>
-                    Designed with glassmorphic UI aesthetics, 8-dimensional scoring models, real-time draft saving, and ATS resume scanning.
-                  </p>
-                </>
+
+                  {/* Architecture & Tech Stack Specs */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <div className="p-3 rounded-xl bg-slate-900/60 border border-white/5 space-y-1">
+                      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Engine</div>
+                      <div className="text-xs font-semibold text-brand-300">AI-powered interview intelligence</div>
+                    </div>
+                    <div className="p-3 rounded-xl bg-slate-900/60 border border-white/5 space-y-1">
+                      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Database</div>
+                      <div className="text-xs font-semibold text-emerald-300">SQLite (High Concurrency, WAL Mode)</div>
+                    </div>
+                    <div className="p-3 rounded-xl bg-slate-900/60 border border-white/5 space-y-1">
+                      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Technology Stack</div>
+                      <div className="text-xs font-semibold text-cyan-300">React, TypeScript, Express and TailwindCSS</div>
+                    </div>
+                    <div className="p-3 rounded-xl bg-slate-900/60 border border-white/5 space-y-1">
+                      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Voice & Speech</div>
+                      <div className="text-xs font-semibold text-purple-300">Web Speech Synthesis & Recognition API</div>
+                    </div>
+                  </div>
+
+                  {/* Interview Details Section */}
+                  <div className="space-y-2.5 pt-1">
+                    <div className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5 border-b border-white/10 pb-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-brand-400" />
+                      <span>Interview Details</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-2.5">
+                      <div className="p-3 rounded-xl bg-slate-900/40 border border-white/5 space-y-1">
+                        <div className="text-xs font-bold text-slate-200">• AI-Powered Mock Interviews</div>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                          Practice realistic technical interviews with dynamically generated questions tailored to industry standards.
+                        </p>
+                      </div>
+
+                      <div className="p-3 rounded-xl bg-slate-900/40 border border-white/5 space-y-1">
+                        <div className="text-xs font-bold text-slate-200">• Role-Based Questions</div>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                          Questions tailored to the selected role, including Software Engineer, Frontend Developer, Backend Developer, AI / Machine Learning Engineer, Data Analyst, Business Analyst, and Custom Tech Roles.
+                        </p>
+                      </div>
+
+                      <div className="p-3 rounded-xl bg-slate-900/40 border border-white/5 space-y-1">
+                        <div className="text-xs font-bold text-slate-200">• Adaptive Interview Flow</div>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                          Questions progress based on the interview session and candidate's previous responses to provide authentic depth.
+                        </p>
+                      </div>
+
+                      <div className="p-3 rounded-xl bg-slate-900/40 border border-white/5 space-y-1">
+                        <div className="text-xs font-bold text-slate-200">• Multiple Question Types</div>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                          Structured coverage across technical, conceptual, problem-solving, architectural, behavioral, and role-specific domains.
+                        </p>
+                      </div>
+
+                      <div className="p-3 rounded-xl bg-slate-900/40 border border-white/5 space-y-1">
+                        <div className="text-xs font-bold text-slate-200">• Real-Time Response Evaluation</div>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                          Candidate responses are evaluated across individual scoring rubrics to produce meaningful, objective feedback.
+                        </p>
+                      </div>
+
+                      <div className="p-3 rounded-xl bg-slate-900/40 border border-white/5 space-y-1">
+                        <div className="text-xs font-bold text-slate-200">• Multi-Dimensional Performance Feedback</div>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                          Comprehensive evaluation covering Technical Accuracy, Relevance, Clarity, Communication, Technical Depth, Key Strengths, Areas for Improvement, and Suggested Improved Answers.
+                        </p>
+                      </div>
+
+                      <div className="p-3 rounded-xl bg-slate-900/40 border border-white/5 space-y-1">
+                        <div className="text-xs font-bold text-slate-200">• Interview History & Progress Tracking</div>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                          Completed interviews, transcripts, and score analytics are recorded locally for review and continuous performance tracking.
+                        </p>
+                      </div>
+
+                      <div className="p-3 rounded-xl bg-slate-900/40 border border-white/5 space-y-1">
+                        <div className="text-xs font-bold text-slate-200">• Resume-Assisted Practice</div>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                          ATS resume analysis extracts candidate skills and domain background to create highly relevant, resume-assisted interview sessions.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Closing Statement */}
+                  <div className="pt-2 border-t border-white/10 text-[11px] text-slate-300 italic">
+                    "InterviewAI is designed to help candidates practice consistently, identify their weaknesses, and approach technical interviews with greater confidence."
+                  </div>
+                </div>
               )}
             </div>
 

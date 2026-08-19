@@ -29,7 +29,7 @@ export const LandingPage: React.FC = () => {
       icon: BrainCircuit,
       color: 'text-brand-400',
       bg: 'bg-brand-500/10',
-      title: 'Gemini AI Mock Interviews',
+      title: 'AI-Powered Mock Interviews',
       desc: 'Dynamic real-time question generation tailored specifically to your target job role and difficulty level.'
     },
     {
@@ -43,7 +43,7 @@ export const LandingPage: React.FC = () => {
       icon: Target,
       color: 'text-emerald-400',
       bg: 'bg-emerald-500/10',
-      title: '6-Dimensional Feedback',
+      title: 'Multi-Dimensional Feedback',
       desc: 'Detailed scoring on technical precision, communication, grammar, confidence, and problem-solving.'
     },
     {
@@ -57,8 +57,8 @@ export const LandingPage: React.FC = () => {
       icon: Smartphone,
       color: 'text-cyan-400',
       bg: 'bg-cyan-500/10',
-      title: 'Capacitor Mobile Ready',
-      desc: 'Cross-platform native architectural layout ready for instant Android APK compilation.'
+      title: 'Responsive Cross-Platform',
+      desc: 'Optimized glassmorphic layout designed for seamless practice on desktop and mobile browsers.'
     },
     {
       icon: ShieldCheck,
@@ -71,7 +71,7 @@ export const LandingPage: React.FC = () => {
 
   const howItWorks = [
     { step: '01', title: 'Select Job Role & Difficulty', desc: 'Pick from 12+ industry standard tech roles or input your own custom position.' },
-    { step: '02', title: 'Answer Single AI Questions', desc: 'Interact with Gemini AI one question at a time with live countdown timer.' },
+    { step: '02', title: 'Answer Single AI Questions', desc: 'Interact with the AI interviewer one question at a time with live countdown timer.' },
     { step: '03', title: 'Receive AI Scorecard', desc: 'Get immediate breakdown scores, model suggested answers, and improvement tips.' },
     { step: '04', title: 'Track Mastery & Streaks', desc: 'Build daily habits with streak counters and analytics dashboards.' }
   ];
@@ -102,12 +102,12 @@ export const LandingPage: React.FC = () => {
 
   const faqs = [
     {
-      q: 'How does Gemini API power the mock interviews?',
-      a: 'INTERVIEWAI connects directly to Google Gemini API to analyze your selected job role and difficulty, dynamically producing realistic questions and assessing your answers with 6 distinct rubric dimensions.'
+      q: 'How does the AI power the mock interviews?',
+      a: 'INTERVIEWAI analyzes your selected job role and difficulty, dynamically producing realistic questions and assessing your answers with multi-dimensional rubric scoring.'
     },
     {
       q: 'Can I use INTERVIEWAI on my mobile device?',
-      a: 'Yes! The entire application is built with a responsive glassmorphic design and Capacitor architecture, making it ready for Android devices and mobile web.'
+      a: 'Yes! The entire application is built with a responsive glassmorphic design, making it seamless to practice on both desktop and mobile web screens.'
     },
     {
       q: 'Is my resume and interview data kept private?',
@@ -133,7 +133,7 @@ export const LandingPage: React.FC = () => {
             className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-brand-500/10 border border-brand-500/30 text-brand-300 text-xs font-semibold mb-8 backdrop-blur-md"
           >
             <Sparkles className="w-4 h-4 text-brand-400 animate-pulse" />
-            <span>Next-Gen AI Interviewer Powered by Gemini 2.5</span>
+            <span>Next-Gen AI Interview Practice Platform</span>
           </motion.div>
 
           <motion.h1
@@ -288,7 +288,7 @@ export const LandingPage: React.FC = () => {
           </div>
           <h2 className="text-3xl font-bold text-white">100% Free During Production Beta</h2>
           <p className="text-slate-400 text-sm max-w-xl mx-auto">
-            All features including unlimited Gemini AI sessions, ATS resume analyses, analytics dashboards, and history tracking are free.
+            All features including unlimited AI interview sessions, ATS resume analyses, analytics dashboards, and history tracking are free.
           </p>
         </div>
       </section>

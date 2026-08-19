@@ -49,12 +49,10 @@ export const Footer: React.FC = () => {
           </div>
         </div>
 
-        <div className="pt-8 border-t border-white/5 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
+        <div className="pt-8 border-t border-white/5 flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-3 text-xs text-slate-500 text-center">
           <p>© {new Date().getFullYear()} INTERVIEWAI. All rights reserved.</p>
-          <div className="flex items-center gap-1">
-            <span>Designed for production and Capacitor mobile deployment</span>
-            <Heart className="w-3.5 h-3.5 text-red-500 fill-red-500 inline ml-1" />
-          </div>
+          <span className="hidden sm:inline text-slate-700">•</span>
+          <span className="text-slate-400 font-medium">An initiative by Gesha Morphic</span>
         </div>
       </div>
     </footer>

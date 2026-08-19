@@ -65,13 +65,13 @@ export const Sidebar: React.FC = () => {
           })}
         </nav>
 
-        {/* Upgrade / Pro promo card */}
+        {/* AI Intelligence badge card */}
         <div className="p-4 rounded-xl bg-gradient-to-br from-brand-950/60 to-indigo-950/60 border border-brand-500/30 text-center space-y-2">
           <div className="w-8 h-8 rounded-full bg-brand-500/20 text-brand-400 flex items-center justify-center mx-auto">
             <Sparkles className="w-4 h-4" />
           </div>
-          <div className="text-xs font-semibold text-white">Gemini 2.5 Flash AI</div>
-          <p className="text-[11px] text-slate-400">Powered by real-time neural evaluation models</p>
+          <div className="text-xs font-semibold text-white">AI Interview Intelligence</div>
+          <p className="text-[11px] text-slate-400">Powered by real-time adaptive evaluation models</p>
         </div>
       </div>
     </aside>

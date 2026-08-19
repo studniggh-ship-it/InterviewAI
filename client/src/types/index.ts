@@ -90,12 +90,26 @@ export interface EvaluationReport {
   accuracyScore: number;
   difficultyLevel: string;
   estimatedPerformance: string;
+  performanceSummary?: string;
+  categoryScores?: Record<string, number>;
   strengths: string[];
   weaknesses: string[];
   suggestedAnswers: {
     questionIndex: number;
     question: string;
+    category?: string;
+    candidateAnswer?: string;
+    score?: number;
+    technicalAccuracy?: number;
+    relevance?: number;
+    clarity?: number;
+    depth?: number;
+    isAnswered?: boolean;
     suggestedAnswer: string;
+    aiUnderstanding?: string;
+    strengths?: string[];
+    weaknesses?: string[];
+    feedbackText?: string;
   }[];
   tips: string[];
 }

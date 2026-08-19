@@ -192,9 +192,10 @@ export function useVoiceSpeech(options: UseVoiceSpeechOptions = {}) {
   const startListening = useCallback(() => {
     if (!isSupported || typeof window === 'undefined') return;
 
-    // Interrupt AI voice immediately (Barge-in / Gemini Live experience)
-    stopSpeaking();
-
+    // Interrupt AI voice immediately (Barge-in / live interaction)
+    if (isSpeaking) {
+      stopSpeaking();
+    }
     // Cancel any existing recognition instance
     if (recognitionRef.current) {
       try {

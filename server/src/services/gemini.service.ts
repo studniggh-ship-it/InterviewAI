@@ -1,12 +1,39 @@
 import { aiClient, GEMINI_MODEL } from '../config/gemini';
 
 export interface SingleAnswerEvaluation {
+  score: number;
   correctnessScore: number;
+  technicalAccuracy: number;
+  relevance: number;
+  clarity: number;
+  depth: number;
+  communication: number;
   aiUnderstanding: string;
-  strengths: string;
-  weaknesses: string;
+  strengths: string[];
+  weaknesses: string[];
   suggestedAnswer: string;
   feedbackText: string;
+  isAnswered: boolean;
+}
+
+export interface EvaluatedQuestionAnswer {
+  questionId?: number;
+  questionIndex: number;
+  question: string;
+  category?: string;
+  answer: string;
+  timeSpentSeconds?: number;
+  correctnessScore?: number;
+  technicalAccuracy?: number;
+  relevanceScore?: number;
+  clarityScore?: number;
+  depthScore?: number;
+  isAnswered?: boolean;
+  feedbackText?: string;
+  strengthsText?: string;
+  weaknessesText?: string;
+  suggestedAnswer?: string;
+  aiUnderstanding?: string;
 }
 
 export interface QuestionResponse {
@@ -36,9 +63,27 @@ export interface EvaluationResponse {
   accuracyScore: number;
   difficultyLevel: string;
   estimatedPerformance: string;
+  performanceSummary: string;
+  categoryScores: Record<string, number>;
   strengths: string[];
   weaknesses: string[];
-  suggestedAnswers: { questionIndex: number; question: string; suggestedAnswer: string }[];
+  suggestedAnswers: {
+    questionIndex: number;
+    question: string;
+    category?: string;
+    candidateAnswer?: string;
+    score: number;
+    technicalAccuracy?: number;
+    relevance?: number;
+    clarity?: number;
+    depth?: number;
+    isAnswered?: boolean;
+    suggestedAnswer: string;
+    aiUnderstanding?: string;
+    strengths?: string[];
+    weaknesses?: string[];
+    feedbackText?: string;
+  }[];
   tips: string[];
 }
 
@@ -65,83 +110,390 @@ export interface ResumeAnalysisResponse {
   tips: string[];
 }
 
+// Standard 8-Category Taxonomy Matrix for comprehensive question rotation
+export const STANDARD_QUESTION_CATEGORIES = [
+  'Fundamentals',
+  'Practical/Application',
+  'Problem Solving',
+  'Debugging',
+  'System Design',
+  'Behavioral',
+  'Scenario Based',
+  'Advanced Concepts'
+] as const;
+
+export type StandardQuestionCategory = (typeof STANDARD_QUESTION_CATEGORIES)[number];
+
+export const QUESTION_CATEGORIES = [
+  ...STANDARD_QUESTION_CATEGORIES,
+  'Technical Architecture',
+  'Code Quality & Testing',
+  'Concurrency & Performance',
+  'Security & Reliability',
+  'Cloud & DevOps'
+];
+
 /**
- * Calculates string similarity using normalized Jaccard word tokens and character n-grams.
- * Returns a value between 0.0 (completely distinct) and 1.0 (identical).
+ * Normalizes question text by:
+ * - converting to lowercase
+ * - removing unnecessary punctuation
+ * - normalizing whitespace
  */
-export function calculateQuestionSimilarity(textA: string, textB: string): number {
-  if (!textA || !textB) return 0;
-  
-  const stopWords = new Set([
-    'the', 'a', 'an', 'is', 'in', 'at', 'of', 'on', 'and', 'or', 'to', 'how', 'what', 'why',
-    'can', 'you', 'your', 'explain', 'describe', 'tell', 'me', 'about', 'with', 'for', 'when',
-    'would', 'have', 'been', 'which', 'from', 'this', 'that', 'our', 'will', 'could', 'should'
-  ]);
-  
-  const tokenize = (s: string) => s.toLowerCase()
-    .replace(/[^\w\s]/g, ' ')
-    .split(/\s+/)
-    .filter(w => w.length > 2 && !stopWords.has(w));
-    
-  const tokensA = new Set(tokenize(textA));
-  const tokensB = new Set(tokenize(textB));
-  
-  if (tokensA.size === 0 || tokensB.size === 0) {
-    return textA.toLowerCase().trim() === textB.toLowerCase().trim() ? 1.0 : 0.0;
+export function normalizeQuestionText(text: string): string {
+  if (!text) return '';
+  return text
+    .toLowerCase()
+    .replace(/['’]/g, '') // remove apostrophes cleanly (e.g. don't -> dont)
+    .replace(/[^\w\s]/g, ' ') // replace punctuation with space
+    .replace(/\s+/g, ' ') // collapse multiple spaces
+    .trim();
+}
+
+/**
+ * Selects the next target category systematically rotating through STANDARD_QUESTION_CATEGORIES.
+ */
+export function selectNextCategory(
+  questionIndex: number,
+  usedCategories: string[] = []
+): string {
+  // 1. Find categories in STANDARD_QUESTION_CATEGORIES that haven't been used yet in this session
+  const unused = STANDARD_QUESTION_CATEGORIES.filter(cat => !usedCategories.includes(cat));
+  if (unused.length > 0) {
+    return unused[questionIndex % unused.length];
   }
-  
-  // Jaccard Intersection over Union
+
+  // 2. If all categories have been used (e.g. question index >= 8), find the category used least frequently,
+  // making sure it is not the immediately preceding category.
+  const lastUsed = usedCategories.length > 0 ? usedCategories[usedCategories.length - 1] : '';
+  const counts: Record<string, number> = {};
+  for (const cat of STANDARD_QUESTION_CATEGORIES) {
+    counts[cat] = usedCategories.filter(c => c === cat).length;
+  }
+
+  const sorted = [...STANDARD_QUESTION_CATEGORIES]
+    .filter(cat => cat !== lastUsed)
+    .sort((a, b) => (counts[a] || 0) - (counts[b] || 0));
+
+  return sorted[0] || STANDARD_QUESTION_CATEGORIES[questionIndex % STANDARD_QUESTION_CATEGORIES.length];
+}
+
+const INTERVIEW_STOP_WORDS = new Set([
+  'the', 'a', 'an', 'is', 'are', 'was', 'were', 'in', 'at', 'of', 'on', 'and', 'or', 'to',
+  'how', 'what', 'why', 'where', 'when', 'which', 'who', 'whom', 'whose',
+  'can', 'you', 'your', 'explain', 'describe', 'tell', 'me', 'about', 'with', 'for',
+  'would', 'have', 'had', 'has', 'been', 'being', 'from', 'this', 'that', 'these', 'those',
+  'our', 'will', 'could', 'should', 'please', 'discuss', 'approach', 'strategy',
+  'system', 'systems', 'production', 'handle', 'handling', 'work', 'works', 'working',
+  'manage', 'managing', 'implement', 'implementing', 'built', 'building', 'use', 'using'
+]);
+
+/**
+ * Extracts core semantic tokens by stripping conversational filler and interview stop words.
+ */
+export function extractCoreTokens(text: string): Set<string> {
+  const norm = normalizeQuestionText(text);
+  const words = norm.split(' ');
+  const tokens = new Set<string>();
+  for (const w of words) {
+    if (w.length > 2 && !INTERVIEW_STOP_WORDS.has(w)) {
+      tokens.add(w);
+    }
+  }
+  return tokens;
+}
+
+export interface SimilarityResult {
+  similarity: number;
+  isDuplicate: boolean;
+  reason?: string;
+  matchedQuestion?: string;
+}
+
+/**
+ * Evaluates whether a new question is an exact match, semantic duplicate, or high-similarity rewording.
+ */
+export function evaluateQuestionSimilarity(
+  newQuestion: string,
+  existingQuestion: string
+): SimilarityResult {
+  const normNew = normalizeQuestionText(newQuestion);
+  const normExisting = normalizeQuestionText(existingQuestion);
+
+  if (!normNew || !normExisting) {
+    return { similarity: 0, isDuplicate: false };
+  }
+
+  // 1. Exact normalized text match check
+  if (normNew === normExisting) {
+    return {
+      similarity: 1.0,
+      isDuplicate: true,
+      reason: 'Exact normalized text match',
+      matchedQuestion: existingQuestion
+    };
+  }
+
+  const tokensNew = extractCoreTokens(newQuestion);
+  const tokensExisting = extractCoreTokens(existingQuestion);
+
+  // If no significant core tokens, fall back to exact match
+  if (tokensNew.size === 0 || tokensExisting.size === 0) {
+    const isExact = normNew === normExisting;
+    return {
+      similarity: isExact ? 1.0 : 0.0,
+      isDuplicate: isExact,
+      reason: isExact ? 'Exact match' : undefined,
+      matchedQuestion: isExact ? existingQuestion : undefined
+    };
+  }
+
+  // 2. Token overlap and Jaccard similarity
   let intersectionCount = 0;
-  tokensA.forEach(t => {
-    if (tokensB.has(t)) intersectionCount++;
+  tokensNew.forEach(token => {
+    if (tokensExisting.has(token)) {
+      intersectionCount++;
+    }
   });
-  
-  const unionCount = new Set([...tokensA, ...tokensB]).size;
+
+  const unionCount = new Set([...tokensNew, ...tokensExisting]).size;
   const jaccard = unionCount === 0 ? 0 : intersectionCount / unionCount;
-  
-  // Character Trigram overlap for grammatical and morphological variations
+
+  // Containment ratio: overlap relative to the shorter question's core concepts
+  const minTokens = Math.min(tokensNew.size, tokensExisting.size);
+  const containmentRatio = minTokens === 0 ? 0 : intersectionCount / minTokens;
+
+  // 3. Character Trigram overlap for grammatical and morphological variations
   const getTrigrams = (s: string) => {
-    const clean = s.toLowerCase().replace(/\s+/g, ' ');
     const tg = new Set<string>();
-    for (let i = 0; i <= clean.length - 3; i++) {
-      tg.add(clean.substring(i, i + 3));
+    for (let i = 0; i <= s.length - 3; i++) {
+      tg.add(s.substring(i, i + 3));
     }
     return tg;
   };
-  
-  const tgA = getTrigrams(textA);
-  const tgB = getTrigrams(textB);
+
+  const tgA = getTrigrams(normNew);
+  const tgB = getTrigrams(normExisting);
   let tgMatch = 0;
   tgA.forEach(t => { if (tgB.has(t)) tgMatch++; });
   const tgUnion = new Set([...tgA, ...tgB]).size;
   const trigramSim = tgUnion === 0 ? 0 : tgMatch / tgUnion;
-  
-  return (jaccard * 0.7) + (trigramSim * 0.3);
+
+  const combinedSimilarity = (jaccard * 0.5) + (containmentRatio * 0.3) + (trigramSim * 0.2);
+
+  // Duplicate rejection triggers
+  if (jaccard >= 0.45) {
+    return {
+      similarity: Math.round(combinedSimilarity * 100) / 100,
+      isDuplicate: true,
+      reason: `High concept word overlap (Jaccard: ${Math.round(jaccard * 100)}%)`,
+      matchedQuestion: existingQuestion
+    };
+  }
+
+  if (containmentRatio >= 0.65 && minTokens >= 2) {
+    return {
+      similarity: Math.round(combinedSimilarity * 100) / 100,
+      isDuplicate: true,
+      reason: `High semantic containment ratio (${Math.round(containmentRatio * 100)}% of core concepts rephrased)`,
+      matchedQuestion: existingQuestion
+    };
+  }
+
+  if (trigramSim >= 0.65) {
+    return {
+      similarity: Math.round(combinedSimilarity * 100) / 100,
+      isDuplicate: true,
+      reason: `High morphological trigram similarity (${Math.round(trigramSim * 100)}%)`,
+      matchedQuestion: existingQuestion
+    };
+  }
+
+  if (combinedSimilarity >= 0.50) {
+    return {
+      similarity: Math.round(combinedSimilarity * 100) / 100,
+      isDuplicate: true,
+      reason: `High overall similarity score (${Math.round(combinedSimilarity * 100)}%)`,
+      matchedQuestion: existingQuestion
+    };
+  }
+
+  return {
+    similarity: Math.round(combinedSimilarity * 100) / 100,
+    isDuplicate: false,
+    matchedQuestion: existingQuestion
+  };
 }
 
-// 24+ Category Taxonomy Matrix
-export const QUESTION_CATEGORIES = [
-  'Technical Architecture',
-  'System Design',
-  'Problem Solving',
-  'Behavioral & Culture',
-  'Debugging & Triage',
-  'Project Deep-Dive',
-  'Database & Data Modeling',
-  'Security & Reliability',
-  'Cloud & DevOps',
-  'Algorithms & Optimization',
-  'Code Quality & Testing',
-  'Concurrency & Performance',
-  'API & Protocol Design',
-  'Team Collaboration & Leadership',
-  'Conflict Resolution',
-  'Decision Making Under Constraints',
-  'Situational Judgment',
-  'Learning Agility',
-  'Career Trajectory & Motivation',
-  'Time Management & Prioritization'
-];
+/**
+ * Checks a candidate question against all previously asked questions in the session.
+ */
+export function checkAgainstPreviousQuestions(
+  newQuestion: string,
+  previousQuestions: string[]
+): { isDuplicate: boolean; matchedQuestion?: string; reason?: string; similarity: number } {
+  for (const prevQ of previousQuestions) {
+    const evalRes = evaluateQuestionSimilarity(newQuestion, prevQ);
+    if (evalRes.isDuplicate) {
+      return {
+        isDuplicate: true,
+        matchedQuestion: prevQ,
+        reason: evalRes.reason,
+        similarity: evalRes.similarity
+      };
+    }
+  }
+  return { isDuplicate: false, similarity: 0 };
+}
+
+/**
+ * Dynamic Non-Repetitive Combinatoric Synthesis Fallback Generator.
+ * Synthesizes unique questions across standard categories, role domains, and technologies
+ * ensuring zero high-similarity collisions with prior questions in the session.
+ */
+export function generateDynamicFallbackQuestion(
+  role: string,
+  difficulty: string,
+  questionIndex: number,
+  previousQuestions: string[] = [],
+  usedCategories: string[] = [],
+  targetCategory: string = 'Fundamentals',
+  resumeContext?: ResumeContext
+): QuestionResponse {
+  const categoryTemplates: Record<string, string[]> = {
+    'Fundamentals': [
+      'core memory management, garbage collection mechanics, and lifecycle optimization',
+      'protocol handshakes, connection multiplexing, and efficient serialization formats',
+      'type systems, runtime invariant checking, and structural subtype validation',
+      'asynchronous event loop mechanics, microtasks, and task queue scheduling',
+      'cache coherence protocols and transactional isolation levels'
+    ],
+    'Practical/Application': [
+      'building an automated end-to-end data pipeline with robust backpressure handling',
+      'implementing resilient client-side state synchronization with optimistic updates',
+      'structuring component hierarchies and modular library interfaces for high reuse',
+      'integrating third-party webhooks with at-least-once delivery guarantees and idempotency',
+      'implementing zero-downtime database schema migrations on high-write production tables'
+    ],
+    'Problem Solving': [
+      'designing a distributed rate limiter using a sliding window counter or token bucket',
+      'implementing a high-performance LRU/LFU cache with O(1) reads and thread-safe evictions',
+      'detecting and preventing circular dependency deadlocks in a workflow DAG orchestrator',
+      'resolving high tail latency spikes (p99) caused by garbage collection or thread contention',
+      'architecting an efficient pagination and search indexing strategy across millions of records'
+    ],
+    'Debugging': [
+      'diagnosing an intermittent memory leak and thread pool starvation in a high-throughput microservice',
+      'troubleshooting a silent database deadlocking incident during concurrent batch transactions',
+      'isolating cascading failures and network partition timeouts in a distributed service mesh',
+      'triage and root-cause analysis of browser UI rendering freezes and Core Web Vitals regressions',
+      'debugging corrupted distributed state across WebSocket replicas when nodes restart'
+    ],
+    'System Design': [
+      'architecting an event-driven notification engine supporting millions of concurrent subscribers',
+      'designing a globally distributed active-active database replication and failover architecture',
+      'structuring a CQRS and event-sourcing system with read-model projections and replay capability',
+      'designing a scalable video processing or asset transformation pipeline with priority queues',
+      'designing a secure API gateway with rate-limiting, OAuth2 token validation, and circuit breakers'
+    ],
+    'Behavioral': [
+      'navigating an architectural deadlock between senior engineers with opposing design philosophies',
+      'balancing critical architectural refactoring against high-pressure quarterly product deadlines',
+      'leading a blameless post-mortem after a critical severity-1 outage in production',
+      'mentoring team members through complex engineering paradigms while maintaining sprint velocity',
+      'handling shifting product requirements mid-flight without compromising engineering quality'
+    ],
+    'Scenario Based': [
+      'handling a sudden 10x traffic surge during a major marketing campaign without degrading user experience',
+      'recovering from a silent data corruption bug in production while preserving customer trust and uptime',
+      'decoupling a legacy monolithic codebase into isolated microservices without taking downtime',
+      'safely rolling out a breaking API contract change to external third-party consumers',
+      'handling upstream third-party dependency outages gracefully using circuit breakers and fallback stores'
+    ],
+    'Advanced Concepts': [
+      'concurrency primitives, lock-free data structures, and memory barrier semantics',
+      'distributed consensus protocols (Raft, Paxos) and leader election failovers',
+      'database internal storage engines (LSM-trees vs B+ trees) and write amplification trade-offs',
+      'fine-grained zero-trust security policies and mutual TLS in containerized environments',
+      'chaos engineering and automated fault injection to validate system resilience'
+    ]
+  };
+
+  const leadIns = [
+    "Thank you, that's a clear explanation.",
+    "Understood, that's an interesting approach.",
+    "Good point. Building on that,",
+    "Great insights into your technical decisions.",
+    "I appreciate that breakdown.",
+    "That makes sense from an engineering perspective.",
+    "Excellent. Let's explore another dimension.",
+    "Thank you. Shifting gears to system behavior,",
+    "I see your reasoning. Moving forward,",
+    "Great context. Let's delve into architectural trade-offs,"
+  ];
+
+  const pool = categoryTemplates[targetCategory] || categoryTemplates['Fundamentals'];
+  const leadIn = questionIndex > 0 ? leadIns[questionIndex % leadIns.length] + ' ' : '';
+
+  // Extract skills from resume context or role
+  const skillMention = resumeContext?.matchedSkills && resumeContext.matchedSkills.length > 0
+    ? resumeContext.matchedSkills[questionIndex % resumeContext.matchedSkills.length]
+    : undefined;
+
+  let chosenQuestion = '';
+  for (const topic of pool) {
+    const candidateQ = skillMention
+      ? `As a ${role} (${difficulty}), how do you approach ${topic} when working with ${skillMention}?`
+      : `As a ${role} (${difficulty}), how do you approach ${topic} in production systems?`;
+
+    const dup = checkAgainstPreviousQuestions(candidateQ, previousQuestions);
+    if (!dup.isDuplicate) {
+      chosenQuestion = candidateQ;
+      break;
+    }
+  }
+
+  if (!chosenQuestion) {
+    chosenQuestion = `In your experience as a ${role} (${difficulty}), how do you address ${pool[questionIndex % pool.length]}?`;
+  }
+
+  return {
+    questionText: `${leadIn}${chosenQuestion}`,
+    category: targetCategory,
+    conversationalLeadIn: leadIn
+  };
+}
+
+/**
+ * Determines whether a candidate answer is empty, skipped, refusal, or non-substantive.
+ */
+export function isRefusalOrEmptyAnswer(answer?: string | null): boolean {
+  if (!answer) return true;
+  const trimmed = answer.trim();
+  if (trimmed.length === 0) return true;
+
+  const lower = trimmed.toLowerCase().replace(/['']/g, '').replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  
+  const skipPhrases = new Set([
+    'skipped', 'skip', 'no answer', 'no answer provided', 'pass', 'passed', 'next', 'idk',
+    'i dont know', 'i do not know', 'dont know', 'do not know', 'no idea', 'i have no idea',
+    'have no idea', 'not sure', 'im not sure', 'i am not sure', 'no clue', 'dunno',
+    'cant answer', 'cannot answer', 'nothing', 'na', 'n a', 'none', 'i forgot', 'forgot',
+    'no comments', 'no comment', 'pass question', 'skip question', 'leave blank'
+  ]);
+
+  if (skipPhrases.has(lower)) return true;
+  if (lower.startsWith('i dont know') || lower.startsWith('i do not know') || lower.startsWith('idk') || lower.startsWith('no idea') || lower.startsWith('im not sure')) {
+    if (trimmed.split(/\s+/).length <= 8) return true;
+  }
+
+  // Meaningless short text without domain terms
+  if (trimmed.length < 8) {
+    const hasTechWord = /(react|node|sql|data|api|state|code|test|class|func|async|db|aws|git|web|css|html|js|ts|rest|http)/i.test(trimmed);
+    if (!hasTechWord) return true;
+  }
+
+  return false;
+}
 
 export class GeminiService {
   /**
@@ -171,22 +523,33 @@ export class GeminiService {
     question: string,
     answer: string
   ): Promise<SingleAnswerEvaluation> {
-    const isTrivialOrEmpty = !answer || answer.trim().length < 8 || 
-      ['(skipped)', '(no answer)', 'idk', "i don't know", 'no idea', 'skip', 'pass'].includes(answer.trim().toLowerCase());
-
-    if (isTrivialOrEmpty) {
+    if (isRefusalOrEmptyAnswer(answer)) {
+      const lower = (answer || '').toLowerCase();
+      const isHonestIdk = lower.includes('know') || lower.includes('idk') || lower.includes('sure');
+      const score = isHonestIdk ? 10 : 0;
       return {
-        correctnessScore: 15,
-        aiUnderstanding: 'Candidate provided no technical response or skipped the question.',
-        strengths: 'Acknowledged gap rather than fabricating information.',
-        weaknesses: `Did not demonstrate core foundational concepts required for ${role} (${difficulty} level).`,
-        suggestedAnswer: `For '${question}', an ideal response explains the underlying mechanisms, key tradeoffs, and a production implementation example.`,
-        feedbackText: `You skipped or provided insufficient detail for this question. For ${role} interviews, provide structured responses detailing architecture, tools, and tradeoffs.`
+        score,
+        correctnessScore: score,
+        technicalAccuracy: 0,
+        relevance: 0,
+        clarity: 0,
+        depth: 0,
+        communication: isHonestIdk ? 15 : 0,
+        aiUnderstanding: isHonestIdk 
+          ? 'Candidate explicitly indicated they do not know the answer to this question.'
+          : 'Candidate skipped or provided no substantive answer for this question.',
+        strengths: [],
+        weaknesses: [
+          `No substantive technical answer was provided for this ${role} question.`
+        ],
+        suggestedAnswer: `For '${question}', an ideal technical answer should articulate: 1) Core conceptual mechanism, 2) Technical trade-offs, 3) Concrete implementation specifics, and 4) Production reliability or error handling.`,
+        feedbackText: `This question was skipped or unanswered. In technical interviews for ${role}, explaining partial knowledge, related architecture paradigms, or asking clarifying questions is significantly better than skipping.`,
+        isAnswered: false
       };
     }
 
     const prompt = `
-You are a Principal Engineer and Lead Hiring Manager evaluating a candidate's answer for a "${role}" position (${difficulty} level).
+You are an elite Principal Engineering Director and Lead Hiring Examiner evaluating a candidate's answer for a "${role}" position (${difficulty} level).
 
 Question Asked:
 "${question}"
@@ -194,24 +557,47 @@ Question Asked:
 Candidate's Actual Spoken Transcript:
 "${answer}"
 
-EVALUATION RULES (CRITICAL):
-1. Score ONLY based on what the candidate actually said in their transcript.
-2. If the answer is incorrect, nonsensical, or silly, reduce the score strictly (10-35%).
-3. If the answer is partially correct or shallow, score moderately (45-65%).
-4. If the answer is technically accurate, well-structured, and demonstrates senior depth, score high (80-98%).
-5. Under "strengths", quote or reference specific things the candidate mentioned.
-6. Under "weaknesses", specify exact gaps, missing architectural considerations, or incorrect statements.
-7. Provide a concise, master-level "suggestedAnswer".
-8. Provide actionable "feedbackText" referencing their actual answer.
+EVALUATION CRITERIA (CRITICAL):
+1. Evaluate ONLY what the candidate actually said in their submitted answer. Never invent statements or assume unstated knowledge.
+2. If the candidate gave a strong, technically accurate, comprehensive answer:
+   - score: 80 to 98
+   - technicalAccuracy: 80 to 98
+   - depth: 75 to 95
+   - relevance: 85 to 100
+   - clarity: 80 to 95
+   - communication: 80 to 95
+3. If the candidate gave a partially correct or shallow answer:
+   - score: 45 to 65
+   - technicalAccuracy: 45 to 65
+   - depth: 35 to 55
+   - relevance: 60 to 80
+   - clarity: 50 to 75
+   - communication: 55 to 75
+4. If the candidate gave an incorrect, confusing, or erroneous answer:
+   - score: 10 to 35
+   - technicalAccuracy: 10 to 35
+   - depth: 10 to 30
+   - relevance: 20 to 50
+   - clarity: 30 to 60
+   - communication: 30 to 60
+5. "strengths": An array of 1 to 3 bullet points quoting or citing specific technical points the candidate got right. If the answer scored below 40 or is mostly incorrect, strengths MUST be an empty array [].
+6. "weaknesses": An array of 1 to 3 bullet points identifying specific technical gaps, missing edge cases, or errors in their reasoning.
+7. "suggestedAnswer": A concise, master-level improved model answer (2-3 sentences).
+8. "feedbackText": 1-2 sentences of actionable coaching referencing their actual response.
 
 Return ONLY valid JSON matching this schema without markdown:
 {
-  "correctnessScore": 85,
+  "score": 85,
+  "technicalAccuracy": 85,
+  "relevance": 90,
+  "clarity": 80,
+  "depth": 75,
+  "communication": 85,
   "aiUnderstanding": "Candidate explained...",
-  "strengths": "Clearly articulated...",
-  "weaknesses": "Did not mention...",
-  "suggestedAnswer": "A comprehensive answer should...",
-  "feedbackText": "You mentioned... However, you should also..."
+  "strengths": ["Clear explanation of..."],
+  "weaknesses": ["Did not address trade-offs regarding..."],
+  "suggestedAnswer": "An ideal response covers...",
+  "feedbackText": "Good explanation of... To improve, elaborate on..."
 }
 `;
 
@@ -226,13 +612,44 @@ Return ONLY valid JSON matching this schema without markdown:
         const jsonMatch = rawText.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
           const parsed = JSON.parse(jsonMatch[0]);
+          const rawScore = Number(parsed.score ?? parsed.correctnessScore ?? 70);
+          const score = Math.min(100, Math.max(5, rawScore));
+          const technicalAccuracy = Math.min(100, Math.max(5, Number(parsed.technicalAccuracy ?? score)));
+          const relevance = Math.min(100, Math.max(5, Number(parsed.relevance ?? score)));
+          const clarity = Math.min(100, Math.max(5, Number(parsed.clarity ?? score)));
+          const depth = Math.min(100, Math.max(5, Number(parsed.depth ?? score)));
+          const communication = Math.min(100, Math.max(5, Number(parsed.communication ?? clarity)));
+
+          let strengths: string[] = Array.isArray(parsed.strengths) 
+            ? parsed.strengths.filter((s: any) => typeof s === 'string' && s.trim().length > 0)
+            : (typeof parsed.strengths === 'string' && parsed.strengths.trim() ? [parsed.strengths.trim()] : []);
+          
+          if (score < 40) {
+            strengths = [];
+          }
+
+          let weaknesses: string[] = Array.isArray(parsed.weaknesses)
+            ? parsed.weaknesses.filter((w: any) => typeof w === 'string' && w.trim().length > 0)
+            : (typeof parsed.weaknesses === 'string' && parsed.weaknesses.trim() ? [parsed.weaknesses.trim()] : []);
+          
+          if (weaknesses.length === 0 && score < 75) {
+            weaknesses = ['Could expand on underlying trade-offs and edge-case handling.'];
+          }
+
           return {
-            correctnessScore: Math.min(100, Math.max(10, Number(parsed.correctnessScore ?? 75))),
-            aiUnderstanding: parsed.aiUnderstanding || 'Candidate provided a direct response to the question.',
-            strengths: parsed.strengths || 'Provided clear technical context.',
-            weaknesses: parsed.weaknesses || 'Could expand on scalability trade-offs.',
-            suggestedAnswer: parsed.suggestedAnswer || `An ideal answer for '${question}' covers architecture, trade-offs, and practical edge cases.`,
-            feedbackText: parsed.feedbackText || 'Good response with clear engineering reasoning.'
+            score,
+            correctnessScore: score,
+            technicalAccuracy,
+            relevance,
+            clarity,
+            depth,
+            communication,
+            aiUnderstanding: parsed.aiUnderstanding || 'Candidate addressed the interview question.',
+            strengths,
+            weaknesses,
+            suggestedAnswer: parsed.suggestedAnswer || `For '${question}', a senior response covers core architecture, trade-offs, and practical edge cases.`,
+            feedbackText: parsed.feedbackText || 'Response evaluated based on technical accuracy and clarity.',
+            isAnswered: true
           };
         }
       } catch (e) {
@@ -240,34 +657,48 @@ Return ONLY valid JSON matching this schema without markdown:
       }
     }
 
-    // Dynamic heuristic evaluation based on actual answer depth
-    const words = answer.trim().split(/\s+/);
+    // Dynamic heuristic evaluation based on actual answer content and keywords
+    const words = answer.trim().split(/\s+/).filter(Boolean);
     const wordCount = words.length;
     const technicalKeywords = [
       'react', 'node', 'state', 'hook', 'database', 'sql', 'nosql', 'index', 'scale', 'cache',
       'redis', 'api', 'rest', 'graphql', 'grpc', 'concurrency', 'lock', 'thread', 'memory',
-      'architecture', 'latency', 'throughput', 'ci/cd', 'docker', 'kubernetes', 'aws', 'component'
+      'architecture', 'latency', 'throughput', 'ci/cd', 'docker', 'kubernetes', 'aws', 'component',
+      'async', 'promise', 'callback', 'schema', 'transaction', 'blob', 'table', 'cluster', 'load balancer'
     ];
     const techMatches = technicalKeywords.filter(k => answer.toLowerCase().includes(k));
 
-    let score = 50;
+    let score = 45;
     if (wordCount < 15) {
-      score = 25;
-    } else if (wordCount < 40) {
-      score = Math.min(65, 45 + (techMatches.length * 6));
+      score = 20;
+    } else if (wordCount < 35) {
+      score = Math.min(60, 35 + (techMatches.length * 6));
     } else {
-      score = Math.min(95, 65 + (techMatches.length * 5));
+      score = Math.min(92, 55 + (techMatches.length * 5));
     }
 
+    const techAcc = Math.min(100, Math.max(10, score));
+    const rel = Math.min(100, Math.max(15, score + (techMatches.length > 0 ? 5 : -5)));
+    const clar = Math.min(100, Math.max(15, wordCount >= 20 ? score : score - 10));
+    const dep = Math.min(100, Math.max(10, score - 5));
+    const comm = Math.min(100, Math.max(15, clar));
+
     return {
+      score,
       correctnessScore: score,
-      aiUnderstanding: `Candidate discussed ${techMatches.length > 0 ? techMatches.slice(0, 3).join(', ') : 'the core problem'} across ${wordCount} words.`,
-      strengths: techMatches.length > 0 ? `Mentioned relevant tools and concepts: ${techMatches.join(', ')}.` : 'Attempted to address the question directly.',
-      weaknesses: wordCount < 30 ? 'Response was brief; expand on edge-cases, throughput, and error boundaries.' : 'Could quantify performance improvements with concrete metrics.',
-      suggestedAnswer: `For '${question}', an ideal answer covers: 1) Underlying architecture, 2) Technical trade-offs, 3) Implementation specifics, and 4) Production reliability.`,
+      technicalAccuracy: techAcc,
+      relevance: rel,
+      clarity: clar,
+      depth: dep,
+      communication: comm,
+      aiUnderstanding: `Candidate addressed the question with ${wordCount} words${techMatches.length > 0 ? ` referencing ${techMatches.slice(0, 3).join(', ')}` : ''}.`,
+      strengths: score >= 55 && techMatches.length > 0 ? [`Appropriately cited key domain concepts: ${techMatches.slice(0, 3).join(', ')}.`] : [],
+      weaknesses: wordCount < 30 ? ['Response was brief; detail underlying mechanisms and trade-offs.'] : ['Could incorporate more quantitative throughput or edge-case metrics.'],
+      suggestedAnswer: `For '${question}', an ideal response articulates: 1) Underlying architecture, 2) Technical trade-offs, 3) Implementation specifics, and 4) Production reliability.`,
       feedbackText: techMatches.length > 0 
         ? `You appropriately referenced ${techMatches.slice(0, 2).join(' and ')}. To strengthen your answer, elaborate on trade-offs and scaling constraints.`
-        : `Your response touched on the basics. For senior ${role} roles, incorporate specific architectural patterns and production examples.`
+        : `Your response touched on the basics. For ${role} interviews, incorporate specific architectural patterns and production examples.`,
+      isAnswered: true
     };
   }
 
@@ -279,6 +710,16 @@ Return ONLY valid JSON matching this schema without markdown:
    * - Contextual conversational lead-ins
    * - 24+ category taxonomy
    */
+  /**
+   * Robust Dynamic Question Generation Engine with:
+   * - Strict Anti-Repetition & Semantic Duplicate Rejection
+   * - Standard 8-Category Taxonomy Rotation
+   * - Session-isolated question and category history
+   * - Server-side question text normalization
+   * - 3-Attempt Regeneration Loop on Duplicate Detection
+   * - Detailed [Interview] logging
+   * - Adaptive difficulty & follow-up intelligence
+   */
   static async generateQuestion(
     role: string,
     difficulty: string,
@@ -286,7 +727,8 @@ Return ONLY valid JSON matching this schema without markdown:
     previousQuestions: string[] = [],
     previousAnswers: string[] = [],
     resumeContext?: ResumeContext,
-    lastAnswerCorrectness?: number
+    lastAnswerCorrectness?: number,
+    usedCategories: string[] = []
   ): Promise<QuestionResponse> {
     // 1. Determine Adaptive Difficulty
     let effectiveDifficulty = difficulty;
@@ -298,14 +740,14 @@ Return ONLY valid JSON matching this schema without markdown:
       }
     }
 
-    // 2. Select diverse target category avoiding consecutive repeats
-    const categoryIndex = (questionIndex + Math.floor(Math.random() * 3)) % QUESTION_CATEGORIES.length;
-    const targetCategory = QUESTION_CATEGORIES[categoryIndex];
+    // 2. Select diverse target category systematically rotating through STANDARD_QUESTION_CATEGORIES
+    let currentTargetCategory = selectNextCategory(questionIndex, usedCategories);
 
     // 3. Assemble Conversation History
     const historyContext = previousQuestions.map((q, i) => {
       const a = previousAnswers[i] || '(Skipped or In Progress)';
-      return `Q${i + 1}: ${q}\nA${i + 1}: ${a}`;
+      const cat = usedCategories[i] ? ` [Category: ${usedCategories[i]}]` : '';
+      return `Q${i + 1}${cat}: ${q}\nA${i + 1}: ${a}`;
     }).join('\n\n');
 
     // 4. Assemble Resume Context snippet
@@ -326,34 +768,52 @@ Return ONLY valid JSON matching this schema without markdown:
       }
     }
 
-    // 5. Build Smart Dynamic Prompt
+    // 5. 3-Attempt Regeneration Loop
     const maxAttempts = 3;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      // If regenerating due to duplicate detection, switch to another category
+      if (attempt > 1) {
+        const remainingUnused = STANDARD_QUESTION_CATEGORIES.filter(
+          c => !usedCategories.includes(c) && c !== currentTargetCategory
+        );
+        if (remainingUnused.length > 0) {
+          currentTargetCategory = remainingUnused[(attempt - 1) % remainingUnused.length];
+        } else {
+          currentTargetCategory = STANDARD_QUESTION_CATEGORIES[(questionIndex + attempt) % STANDARD_QUESTION_CATEGORIES.length];
+        }
+      }
+
       const prompt = `
 You are a distinguished Lead Technical Interviewer and Senior Director conducting a high-signal, natural voice interview for a "${role}" position.
 Target Difficulty Level: ${effectiveDifficulty} (Adaptively calibrated).
 Current Question Index: ${questionIndex + 1}.
-Primary Category Focus: ${targetCategory}.
+Primary Category Focus: "${currentTargetCategory}".
 ${resumePromptSnippet}
 ${historyContext ? `DIALOGUE CONVERSATION CONTEXT SO FAR:
 ${historyContext}
 
-CONVERSATIONAL VOICE INSTRUCTIONS:
-1. Examine the candidate's last answer in detail.
-2. Formulate a short, natural spoken lead-in (1 sentence max) acknowledging what they actually said (e.g. "That's a solid breakdown of your state management.", "Interesting trade-off regarding indexing.", "Thank you for detailing that pipeline.").
-3. Formulate an intelligent, crisp follow-up or new category question tailored to ${role} (${effectiveDifficulty}).
-4. CRITICAL ANTI-REPETITION: DO NOT ask any question with similar meaning, keywords, or topics to these previous questions:
-${previousQuestions.map((q, idx) => `   - [Already Asked ${idx + 1}]: "${q}"`).join('\n')}
-5. Keep the total question concise (1 to 2 spoken sentences) so it sounds crisp and engaging when spoken aloud.` : `OPENING QUESTION INSTRUCTIONS:
-1. This is the first question of the interview for ${role} (${effectiveDifficulty}).
-2. Do NOT ask generic "Tell me about yourself". Instead, ask a sharp, dynamic, conversational opening question assessing core architecture, technical approach, or their notable engineering journey.
-3. Keep it crisp, conversational, and direct.`}
+PREVIOUS QUESTIONS ASKED IN THIS SESSION:
+${previousQuestions.map((q, idx) => `   ${idx + 1}. "${q}" (Category: ${usedCategories[idx] || 'General'})`).join('\n')}
 
-Generate ONLY valid JSON without markdown:
+STRICT ANTI-REPETITION & QUESTION DIVERSITY RULES (MANDATORY):
+1. NEVER repeat any of the questions already asked above.
+2. NEVER ask a semantically equivalent question or test the exact same concept using different wording.
+3. Avoid merely rewording or phrasing an existing question differently.
+4. Generate a GENUINELY DIFFERENT question strictly focused on the "${currentTargetCategory}" category.
+5. The question must be tailored to the candidate's role (${role}), level (${effectiveDifficulty}), and relevant technologies.
+${lastAnswerCorrectness !== undefined && lastAnswerCorrectness <= 45 ? '6. The candidate had difficulty or gave a brief response on the last question. If formulating a follow-up, clearly build on their answer into a related practical design or recovery scenario — NEVER simply ask them to re-explain the previous question.' : ''}
+${lastAnswerCorrectness !== undefined && lastAnswerCorrectness >= 75 ? '6. The candidate answered strongly. Progress into deeper architecture, edge cases, or trade-offs in ' + currentTargetCategory + '.' : ''}
+7. Formulate a short, natural spoken lead-in (1 sentence max) acknowledging what they said.
+8. Keep the question crisp and conversational (1 to 2 spoken sentences).` : `OPENING QUESTION INSTRUCTIONS:
+1. This is Question 1 of the interview for ${role} (${effectiveDifficulty}) in the category "${currentTargetCategory}".
+2. Do NOT ask generic "Tell me about yourself". Instead, ask a sharp, dynamic, conversational opening question assessing core foundational or practical engineering problem solving for ${role}.
+3. Keep it crisp, conversational, and direct (1 to 2 spoken sentences).`}
+
+Generate ONLY valid JSON without markdown formatting:
 {
   "conversationalLeadIn": "Spoken 1-sentence acknowledgment of prior response (or empty if Q1)",
   "questionText": "Your natural, unique question here?",
-  "category": "${targetCategory}"
+  "category": "${currentTargetCategory}"
 }
 `;
 
@@ -370,284 +830,318 @@ Generate ONLY valid JSON without markdown:
             const parsed = JSON.parse(jsonMatch[0]);
             const leadIn = parsed.conversationalLeadIn ? `${parsed.conversationalLeadIn.trim()} ` : '';
             const rawQ = parsed.questionText ? parsed.questionText.trim() : '';
+            const category = parsed.category || currentTargetCategory;
 
-            // Check similarity with ALL previous questions (>70% threshold)
-            let isDuplicate = false;
-            for (const prevQ of previousQuestions) {
-              const sim = calculateQuestionSimilarity(rawQ, prevQ);
-              if (sim > 0.70) {
-                console.warn(`⚠️ Discarding duplicate question (similarity ${Math.round(sim * 100)}%): "${rawQ}" matches "${prevQ}"`);
-                isDuplicate = true;
-                break;
+            console.log(`[Interview] Question generated: "${rawQ}" (Category: ${category}) [Attempt ${attempt}/${maxAttempts}]`);
+
+            // Server-side duplicate / similarity check
+            const dupCheck = checkAgainstPreviousQuestions(rawQ, previousQuestions);
+
+            if (dupCheck.isDuplicate) {
+              console.log(`[Interview] Duplicate detected: "${rawQ}" is too similar to "${dupCheck.matchedQuestion}" (Similarity: ${Math.round(dupCheck.similarity * 100)}%). Reason: ${dupCheck.reason}`);
+              if (attempt < maxAttempts) {
+                console.log(`[Interview] Regenerating question: (Attempt ${attempt + 1}/${maxAttempts})`);
+                continue;
               }
-            }
-
-            if (!isDuplicate && rawQ.length > 10) {
+            } else if (rawQ.length > 10) {
               const fullQuestion = leadIn ? `${leadIn}${rawQ}` : rawQ;
+              console.log(`[Interview] Question accepted: "${fullQuestion}"`);
               return {
                 questionText: fullQuestion,
-                category: parsed.category || targetCategory,
+                category: category,
                 conversationalLeadIn: parsed.conversationalLeadIn || ''
               };
             }
           }
         } catch (error) {
           console.warn(`⚠️ Gemini question generation attempt ${attempt} failed:`, error);
+          if (attempt < maxAttempts) {
+            console.log(`[Interview] Regenerating question: (Attempt ${attempt + 1}/${maxAttempts})`);
+          }
         }
       }
     }
 
-    // 6. Dynamic Non-Repetitive Combinatoric Synthesis Fallback
-    const dynamicTopics = [
-      // Architecture & System Design
-      'architectural patterns for event-driven microservices',
-      'handling distributed transactions with the Saga pattern versus two-phase commit',
-      'mitigating hot partitions and data skews in distributed databases',
-      'implementing resilient backpressure and rate limiting for high-throughput ingress',
-      'zero-downtime database migrations on tables with billions of rows',
-      'optimizing cache invalidation strategies (write-through vs cache-aside) with Redis',
-      'architecting CQRS (Command Query Responsibility Segregation) with read-model replicas',
-      'designing resilient message deduplication for at-least-once message queues',
-      'evaluating trade-offs between gRPC protocol buffers and REST APIs in microservice meshes',
-      'structuring multi-region failover and active-active database replication',
-      // Performance & Concurrency
-      'debugging async memory leaks, goroutine/thread starvation, and event loop blocking',
-      'optimizing browser rendering performance and Core Web Vitals (LCP, INP, CLS)',
-      'database query indexing strategies (B-Tree vs Hash vs GIN) for complex joins',
-      'concurrency control with optimistic versus pessimistic locking in transactional workflows',
-      'minimizing garbage collection overhead in memory-intensive worker services',
-      'implementing connection pooling and socket reuse under high concurrency',
-      'optimizing Webpack/Vite bundle chunking, dynamic imports, and asset compression',
-      // Reliability & DevOps
-      'designing automated CI/CD canary deployment pipelines with automated rollbacks',
-      'structuring comprehensive observability (distributed tracing, structured metrics, alert thresholds)',
-      'mitigating denial-of-service and securing JWT/OAuth2 token rotation lifetimes',
-      'managing infrastructure as code with Terraform and Kubernetes configuration drift',
-      'implementing zero-trust network policies and mutual TLS between backend microservices',
-      'automating disaster recovery drill testing and database point-in-time recovery',
-      'securing container image supply chains with vulnerability scanners and signed artifacts',
-      // Problem Solving & Algorithms
-      'designing a distributed rate-limiter using a sliding window log algorithm',
-      'implementing an LRU/LFU cache with O(1) read and eviction guarantees',
-      'architecting a real-time collaborative document synchronizer using operational transforms',
-      'detecting and preventing circular dependency deadlocks in workflow dependency graphs',
-      'designing a geospatial nearest-neighbor lookup system using geohashes or quadtrees',
-      // Behavioral & Leadership
-      'resolving fundamental architectural disagreements between senior engineering peers',
-      'prioritizing critical tech debt refactoring against aggressive product milestone deadlines',
-      'leading root-cause analysis post-mortems after a high-severity production outage',
-      'mentoring and leveling up junior team members while maintaining personal code velocity',
-      'negotiating technical trade-offs with non-technical executive stakeholders',
-      'handling scope creep and shifting requirements mid-sprint without burning out the team',
-      'establishing automated code review standards and unit testing culture across a team',
-      // Quality & Testing
-      'designing contract testing strategies across independently deployed microservices',
-      'preventing flaky integration tests in asynchronous message-driven architectures',
-      'implementing mutation testing to measure actual test assertion effectiveness',
-      'simulating network partitions and chaos engineering experiments with Chaos Mesh'
-    ];
+    // 6. Dynamic Combinatoric Synthesis Fallback
+    const fallback = generateDynamicFallbackQuestion(
+      role,
+      effectiveDifficulty,
+      questionIndex,
+      previousQuestions,
+      usedCategories,
+      currentTargetCategory,
+      resumeContext
+    );
 
-    const leadIns = [
-      "Thank you, that's a clear explanation.",
-      "Understood, that's an interesting approach.",
-      "Good point. Building on that,",
-      "Great insights into your technical decisions.",
-      "I appreciate that breakdown.",
-      "That makes sense from an engineering perspective.",
-      "Excellent. Let's explore another dimension.",
-      "Thank you. Shifting gears to system behavior,",
-      "I see your reasoning. Moving forward,",
-      "Great context. Let's delve into architectural trade-offs,"
-    ];
-
-    // Pick a topic with ZERO similarity collisions against any previous questions
-    let chosenTopic = dynamicTopics[0];
-    for (const t of dynamicTopics) {
-      const candidateQ = `As a ${role} (${effectiveDifficulty}), how do you approach ${t} in production systems?`;
-      const hasCollision = previousQuestions.some(prev => calculateQuestionSimilarity(candidateQ, prev) > 0.40);
-      if (!hasCollision) {
-        chosenTopic = t;
-        break;
-      }
-    }
-
-    const selectedLeadIn = questionIndex > 0 ? leadIns[questionIndex % leadIns.length] + " " : "";
-    const generatedFallback = `${selectedLeadIn}As a ${role} (${effectiveDifficulty}), how do you approach ${chosenTopic} in production systems?`;
-
-    return {
-      questionText: generatedFallback,
-      category: targetCategory,
-      conversationalLeadIn: selectedLeadIn
-    };
+    console.log(`[Interview] Question accepted: "${fallback.questionText}" [Dynamic Synthesis Fallback]`);
+    return fallback;
   }
 
   /**
-   * Evaluates all answered questions and returns complete 8-dimension scoring, estimated performance, and model answers.
+   * Evaluates all answered questions and returns complete deterministic scoring, category breakdown, performance summary, and model answers.
    */
   static async evaluateInterview(
     role: string,
     difficulty: string,
-    qaPairs: { question: string; answer: string; timeSpentSeconds?: number; correctnessScore?: number }[]
+    qaPairs: EvaluatedQuestionAnswer[]
   ): Promise<EvaluationResponse> {
-    const prompt = `
-You are an elite Lead Technical Hiring Director evaluating a candidate for a "${role}" position (${difficulty} level).
+    const evaluatedList: {
+      questionIndex: number;
+      question: string;
+      category: string;
+      answer: string;
+      timeSpentSeconds: number;
+      score: number;
+      technicalAccuracy: number;
+      relevance: number;
+      clarity: number;
+      depth: number;
+      communication: number;
+      isAnswered: boolean;
+      aiUnderstanding: string;
+      strengths: string[];
+      weaknesses: string[];
+      suggestedAnswer: string;
+      feedbackText: string;
+    }[] = [];
 
-Here are the questions asked, candidate's actual submitted responses, and individual question metrics:
-${qaPairs.map((pair, index) => `
-Q${index + 1}: ${pair.question}
-A${index + 1}: ${pair.answer || '(No answer provided / Skipped)'}
-Time Spent: ${pair.timeSpentSeconds || 0} seconds
-`).join('\n')}
+    for (const pair of qaPairs) {
+      let itemEval: SingleAnswerEvaluation;
+      const isRefusal = isRefusalOrEmptyAnswer(pair.answer);
 
-EVALUATION CRITERIA (CRITICAL):
-1. Evaluate ONLY the candidate's actual submitted answers. Do not fabricate or assume unstated knowledge.
-2. If the user gave poor, silly, or trivial answers, the overall and technical scores MUST be low (e.g. 20-50).
-3. If the user gave high quality, deep technical answers, the scores should be high (e.g. 80-95).
-4. Score all 8 dimensions (0 to 100):
-   - technicalScore: Technical accuracy, depth, architectural insight.
-   - communicationScore: Clarity, structure, articulation, concise delivery.
-   - confidenceScore: Assertiveness and composure in answers.
-   - problemSolvingScore: Analytical reasoning, edge case consideration, trade-offs.
-   - grammarScore: Linguistic correctness and sentence structure.
-   - vocabularyScore: Industry-standard terminology and precision.
-   - leadershipScore: Ownership mentality, decision making, mentorship.
-   - behaviorScore: Professionalism, collaboration, culture fit.
-5. Calculate overallScore (0-100) based strictly on all answers.
-6. Extract key strengths that quote or directly refer to what the candidate said.
-7. Extract key weaknesses based on what the candidate missed or answered poorly.
-8. Provide detailed model suggested answers for each question.
-9. Provide actionable tips for rapid improvement.
+      if (isRefusal) {
+        itemEval = await GeminiService.evaluateSingleAnswer(role, difficulty, pair.question, pair.answer || '');
+      } else if (
+        pair.correctnessScore !== undefined && 
+        pair.technicalAccuracy !== undefined && 
+        pair.suggestedAnswer &&
+        pair.suggestedAnswer.trim().length > 0
+      ) {
+        let sList: string[] = [];
+        let wList: string[] = [];
+        try { sList = JSON.parse(pair.strengthsText || '[]'); } catch { sList = pair.strengthsText ? [pair.strengthsText] : []; }
+        try { wList = JSON.parse(pair.weaknessesText || '[]'); } catch { wList = pair.weaknessesText ? [pair.weaknessesText] : []; }
+        
+        itemEval = {
+          score: pair.correctnessScore,
+          correctnessScore: pair.correctnessScore,
+          technicalAccuracy: pair.technicalAccuracy,
+          relevance: pair.relevanceScore ?? pair.correctnessScore,
+          clarity: pair.clarityScore ?? pair.correctnessScore,
+          depth: pair.depthScore ?? pair.correctnessScore,
+          communication: pair.clarityScore ?? pair.correctnessScore,
+          aiUnderstanding: pair.aiUnderstanding || 'Candidate provided a structured response.',
+          strengths: sList,
+          weaknesses: wList,
+          suggestedAnswer: pair.suggestedAnswer,
+          feedbackText: pair.feedbackText || '',
+          isAnswered: pair.isAnswered !== undefined ? Boolean(pair.isAnswered) : !isRefusal
+        };
+      } else {
+        itemEval = await GeminiService.evaluateSingleAnswer(role, difficulty, pair.question, pair.answer || '');
+      }
 
-Return valid JSON in this exact schema without markdown formatting:
-{
-  "overallScore": 85,
-  "technicalScore": 84,
-  "communicationScore": 86,
-  "confidenceScore": 82,
-  "problemSolvingScore": 85,
-  "grammarScore": 88,
-  "vocabularyScore": 86,
-  "leadershipScore": 83,
-  "behaviorScore": 87,
-  "accuracyScore": 84,
-  "difficultyLevel": "${difficulty}",
-  "estimatedPerformance": "Strong Hire" | "Hire" | "Leaning Hire" | "Needs Practice",
-  "strengths": [
-    "You provided a strong explanation of...",
-    "Your description of... demonstrated clear mastery"
-  ],
-  "weaknesses": [
-    "When asked about..., you did not address...",
-    "Consider providing more quantitative throughput metrics for..."
-  ],
-  "suggestedAnswers": [
-    {
-      "questionIndex": 0,
-      "question": "Question text...",
-      "suggestedAnswer": "Ideal answer..."
+      evaluatedList.push({
+        questionIndex: pair.questionIndex,
+        question: pair.question,
+        category: pair.category || 'Fundamentals',
+        answer: pair.answer || '(No answer provided)',
+        timeSpentSeconds: pair.timeSpentSeconds || 0,
+        score: itemEval.score,
+        technicalAccuracy: itemEval.technicalAccuracy,
+        relevance: itemEval.relevance,
+        clarity: itemEval.clarity,
+        depth: itemEval.depth,
+        communication: itemEval.communication,
+        isAnswered: itemEval.isAnswered,
+        aiUnderstanding: itemEval.aiUnderstanding,
+        strengths: itemEval.strengths,
+        weaknesses: itemEval.weaknesses,
+        suggestedAnswer: itemEval.suggestedAnswer,
+        feedbackText: itemEval.feedbackText
+      });
     }
-  ],
-  "tips": [
-    "Practice structuring architectural answers with STAR framework",
-    "Explicitly discuss trade-offs and error boundaries"
-  ]
-}
-`;
 
-    if (aiClient) {
-      try {
-        const response = await aiClient.models.generateContent({
-          model: GEMINI_MODEL,
-          contents: prompt,
-        });
+    const totalQuestions = evaluatedList.length;
+    const answeredQuestions = evaluatedList.filter(q => q.isAnswered);
+    const answeredCount = answeredQuestions.length;
+    const skippedCount = totalQuestions - answeredCount;
 
-        const rawText = response.text || '';
-        const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0]);
-          return {
-            overallScore: Number(parsed.overallScore ?? 80),
-            technicalScore: Number(parsed.technicalScore ?? 78),
-            communicationScore: Number(parsed.communicationScore ?? 82),
-            confidenceScore: Number(parsed.confidenceScore ?? 80),
-            problemSolvingScore: Number(parsed.problemSolvingScore ?? 79),
-            grammarScore: Number(parsed.grammarScore ?? 85),
-            vocabularyScore: Number(parsed.vocabularyScore ?? parsed.communicationScore ?? 82),
-            leadershipScore: Number(parsed.leadershipScore ?? 80),
-            behaviorScore: Number(parsed.behaviorScore ?? 82),
-            accuracyScore: Number(parsed.accuracyScore ?? parsed.technicalScore ?? 80),
-            difficultyLevel: parsed.difficultyLevel || difficulty,
-            estimatedPerformance: parsed.estimatedPerformance || (parsed.overallScore >= 85 ? 'Strong Hire' : parsed.overallScore >= 70 ? 'Hire' : 'Needs Practice'),
-            strengths: parsed.strengths || ['Clear communication structure', 'Good domain technical fundamentals'],
-            weaknesses: parsed.weaknesses || ['Could quantify outcomes with exact percentages', 'Detail fault tolerance mechanisms'],
-            suggestedAnswers: parsed.suggestedAnswers || qaPairs.map((pair, i) => ({
-              questionIndex: i,
-              question: pair.question,
-              suggestedAnswer: `An ideal response for '${pair.question}' should articulate exact technical steps, architecture patterns, and metric-driven outcomes.`
-            })),
-            tips: parsed.tips || ['Practice structuring answers with STAR framework', 'Detail error handling mechanisms']
-          };
+    // Deterministic overall & dimensional scores calculated strictly from individual question scores
+    const overallScore = totalQuestions > 0 
+      ? Math.round(evaluatedList.reduce((sum, q) => sum + q.score, 0) / totalQuestions)
+      : 0;
+
+    const technicalScore = totalQuestions > 0 
+      ? Math.round(evaluatedList.reduce((sum, q) => sum + q.technicalAccuracy, 0) / totalQuestions)
+      : 0;
+
+    const communicationScore = totalQuestions > 0 
+      ? Math.round(evaluatedList.reduce((sum, q) => sum + q.communication, 0) / totalQuestions)
+      : 0;
+
+    const problemSolvingScore = totalQuestions > 0 
+      ? Math.round(evaluatedList.reduce((sum, q) => sum + q.depth, 0) / totalQuestions)
+      : 0;
+
+    const accuracyScore = totalQuestions > 0 
+      ? Math.round(evaluatedList.reduce((sum, q) => sum + q.relevance, 0) / totalQuestions)
+      : 0;
+
+    const grammarScore = answeredCount > 0
+      ? Math.round(answeredQuestions.reduce((sum, q) => sum + q.clarity, 0) / answeredCount)
+      : 0;
+
+    // Technical vocabulary score derived from actual terminology in answered questions
+    let avgTechTermCount = 0;
+    if (answeredCount > 0) {
+      const techKeywords = ['react', 'node', 'state', 'sql', 'index', 'cache', 'redis', 'api', 'rest', 'lock', 'thread', 'latency', 'architecture', 'docker', 'aws', 'component', 'pipeline', 'stream', 'async', 'promise', 'database', 'transaction', 'schema'];
+      const termCounts = answeredQuestions.map(q => {
+        const words = q.answer.toLowerCase();
+        return techKeywords.filter(k => words.includes(k)).length;
+      });
+      avgTechTermCount = termCounts.reduce((a, b) => a + b, 0) / answeredCount;
+    }
+    const vocabularyScore = answeredCount > 0 
+      ? Math.min(98, Math.max(15, Math.round(technicalScore * 0.7 + Math.min(25, avgTechTermCount * 6))))
+      : 0;
+
+    const confidenceScore = answeredCount > 0
+      ? Math.min(98, Math.max(15, Math.round((communicationScore * 0.6) + (overallScore * 0.4))))
+      : 0;
+
+    // Behavioral & Leadership metrics derived from actual behavioral/systems questions or scaled communication
+    const behavioralQs = evaluatedList.filter(q => q.category === 'Behavioral' || q.category === 'Scenario Based');
+    const leadershipScore = answeredCount > 0
+      ? (behavioralQs.length > 0 ? Math.round(behavioralQs.reduce((s, q) => s + q.score, 0) / behavioralQs.length) : Math.round((communicationScore * 0.5) + (problemSolvingScore * 0.5)))
+      : 0;
+
+    const behaviorScore = answeredCount > 0
+      ? (behavioralQs.length > 0 ? Math.round(behavioralQs.reduce((s, q) => s + q.clarity, 0) / behavioralQs.length) : Math.round((communicationScore * 0.7) + (accuracyScore * 0.3)))
+      : 0;
+
+    // Category Scores: ONLY for categories that actually exist in this session!
+    const categoryScores: Record<string, number> = {};
+    const uniqueCategories = Array.from(new Set(evaluatedList.map(q => q.category)));
+    for (const cat of uniqueCategories) {
+      const catItems = evaluatedList.filter(q => q.category === cat);
+      categoryScores[cat] = Math.round(catItems.reduce((s, q) => s + q.score, 0) / catItems.length);
+    }
+
+    // Deterministic Performance Tier
+    const estimatedPerformance = overallScore >= 85 
+      ? 'Strong Hire' 
+      : overallScore >= 70 
+      ? 'Hire' 
+      : overallScore >= 55 
+      ? 'Leaning Hire' 
+      : 'Needs Practice';
+
+    // Strengths: Derived strictly from actual answers scoring >= 60
+    const strengthsSet = new Set<string>();
+    for (const q of evaluatedList) {
+      if (q.score >= 60 && q.strengths && q.strengths.length > 0) {
+        for (const s of q.strengths) {
+          if (s && s.trim()) strengthsSet.add(s.trim());
         }
-      } catch (error) {
-        console.warn('⚠️ Gemini evaluation failed, computing data-driven fallback evaluation:', error);
       }
     }
-
-    // Dynamic data-driven evaluation computed strictly from actual candidate answers
-    const totalWords = qaPairs.reduce((acc, curr) => acc + (curr.answer ? curr.answer.split(/\s+/).filter(Boolean).length : 0), 0);
-    const nonSkippedCount = qaPairs.filter(p => p.answer && !p.answer.includes('(Skipped)') && !p.answer.includes('(No answer)') && p.answer.trim().length > 10).length;
-    const answeredRatio = qaPairs.length > 0 ? nonSkippedCount / qaPairs.length : 0;
-    const avgWordsPerAnswer = qaPairs.length > 0 ? totalWords / qaPairs.length : 0;
-
-    let baseScore = 20;
-    if (answeredRatio === 0 || totalWords < 15) {
-      baseScore = 20;
-    } else if (avgWordsPerAnswer < 20) {
-      baseScore = Math.min(55, Math.floor(30 + (answeredRatio * 20)));
-    } else if (avgWordsPerAnswer < 50) {
-      baseScore = Math.min(78, Math.floor(50 + (answeredRatio * 20) + (avgWordsPerAnswer / 5)));
-    } else {
-      baseScore = Math.min(94, Math.floor(65 + (answeredRatio * 20) + Math.min(10, avgWordsPerAnswer / 10)));
+    let strengths = Array.from(strengthsSet).slice(0, 4);
+    if (strengths.length === 0) {
+      strengths = answeredCount > 0
+        ? ['Completed interview session with genuine effort; build stronger foundational depth before final-round evaluations.']
+        : ['Completed the scheduled session. No substantive technical responses were provided to establish technical strengths.'];
     }
 
-    const performance = baseScore >= 85 ? 'Strong Hire' : baseScore >= 70 ? 'Hire' : baseScore >= 60 ? 'Leaning Hire' : 'Needs Practice';
+    // Weaknesses: Derived strictly from actual answers scoring < 60 or skipped questions
+    const weaknessesSet = new Set<string>();
+    for (const q of evaluatedList) {
+      if (q.score < 60 || !q.isAnswered) {
+        if (q.weaknesses && q.weaknesses.length > 0) {
+          for (const w of q.weaknesses) {
+            if (w && w.trim()) weaknessesSet.add(w.trim());
+          }
+        } else if (!q.isAnswered) {
+          weaknessesSet.add(`Did not provide a substantive technical response for ${q.category} question: "${q.question.slice(0, 80)}..."`);
+        }
+      }
+    }
+    let weaknesses = Array.from(weaknessesSet).slice(0, 4);
+    if (weaknesses.length === 0) {
+      weaknesses = ['Consistently strong responses throughout; continue refining precision on high-scale distributed edge cases.'];
+    }
+
+    // Performance Summary: Data-driven summary
+    const strongCategories = Object.entries(categoryScores).filter(([_, score]) => score >= 70).map(([cat]) => cat);
+    const weakCategories = Object.entries(categoryScores).filter(([_, score]) => score < 60).map(([cat]) => cat);
+
+    let summaryText = `Based on your ${totalQuestions}-question interview for ${role} (${difficulty}), you completed ${answeredCount} of ${totalQuestions} questions with an overall score of ${overallScore}%.`;
+    if (strongCategories.length > 0) {
+      summaryText += ` You demonstrated solid proficiency in ${strongCategories.join(', ')}.`;
+    }
+    if (weakCategories.length > 0) {
+      summaryText += ` Targeted preparation is recommended in ${weakCategories.join(', ')}.`;
+    }
+    if (skippedCount > 0) {
+      summaryText += ` Note that ${skippedCount} question${skippedCount > 1 ? 's were' : ' was'} skipped or unanswered.`;
+    }
+
+    // Actionable Tips
+    const tips: string[] = [];
+    if (weakCategories.length > 0) {
+      tips.push(`Deepen domain preparation for ${weakCategories.slice(0, 2).join(' and ')} by implementing concrete practice projects.`);
+    }
+    if (skippedCount > 0) {
+      tips.push('Avoid skipping questions. In live technical interviews, breaking down what you know about related mechanisms is significantly better than passing.');
+    }
+    if (communicationScore < 70 && answeredCount > 0) {
+      tips.push('Structure complex answers using the STAR framework (Situation, Task, Action, Result) to improve clarity and articulation.');
+    }
+    if (problemSolvingScore < 70 && answeredCount > 0) {
+      tips.push('Explicitly articulate architectural trade-offs, error boundaries, and throughput bottlenecks in your designs.');
+    }
+    if (tips.length === 0) {
+      tips.push('Maintain current structured communication patterns and practice time-boxed architectural deep-dives.');
+      tips.push('Continue citing exact quantitative metrics and production telemetry in past project examples.');
+    }
+
+    const suggestedAnswers = evaluatedList.map(item => ({
+      questionIndex: item.questionIndex,
+      question: item.question,
+      category: item.category,
+      candidateAnswer: item.answer,
+      score: item.score,
+      technicalAccuracy: item.technicalAccuracy,
+      relevance: item.relevance,
+      clarity: item.clarity,
+      depth: item.depth,
+      isAnswered: item.isAnswered,
+      suggestedAnswer: item.suggestedAnswer,
+      aiUnderstanding: item.aiUnderstanding,
+      strengths: item.strengths,
+      weaknesses: item.weaknesses,
+      feedbackText: item.feedbackText
+    }));
 
     return {
-      overallScore: baseScore,
-      technicalScore: Math.min(98, Math.max(15, baseScore - 2)),
-      communicationScore: Math.min(98, Math.max(15, baseScore + 2)),
-      confidenceScore: Math.min(98, Math.max(15, baseScore - 1)),
-      problemSolvingScore: Math.min(98, Math.max(15, baseScore)),
-      grammarScore: Math.min(98, Math.max(20, baseScore + 3)),
-      vocabularyScore: Math.min(98, Math.max(15, baseScore + 1)),
-      leadershipScore: Math.min(98, Math.max(15, baseScore - 1)),
-      behaviorScore: Math.min(98, Math.max(20, baseScore + 2)),
-      accuracyScore: Math.min(98, Math.max(15, baseScore - 1)),
+      overallScore,
+      technicalScore,
+      communicationScore,
+      confidenceScore,
+      problemSolvingScore,
+      grammarScore,
+      vocabularyScore,
+      leadershipScore,
+      behaviorScore,
+      accuracyScore,
       difficultyLevel: difficulty,
-      estimatedPerformance: performance,
-      strengths: baseScore >= 60 ? [
-        'Structured answers directly addressing questions',
-        'Communicated technical decisions with reasonable clarity'
-      ] : [
-        'Engaged with the interview format',
-        'Identified areas where further preparation is beneficial'
-      ],
-      weaknesses: baseScore < 60 ? [
-        'Answers lacked necessary depth and technical specifics required for this role',
-        'Several questions were skipped or answered with insufficient technical detail'
-      ] : [
-        'Could incorporate more quantitative throughput metrics into past project examples',
-        'Explicitly outline error boundaries and disaster recovery trade-offs'
-      ],
-      suggestedAnswers: qaPairs.map((pair, idx) => ({
-        questionIndex: idx,
-        question: pair.question,
-        suggestedAnswer: `For '${pair.question}', a senior response provides: 1) Core conceptual overview, 2) Technical mechanism & trade-offs, 3) Real-world production edge case resolution, and 4) Measurable outcome.`
-      })),
-      tips: [
-        'Frame complex answers with the STAR (Situation, Task, Action, Result) methodology',
-        'Proactively highlight trade-offs and alternative solutions considered'
-      ]
+      estimatedPerformance,
+      performanceSummary: summaryText,
+      categoryScores,
+      strengths,
+      weaknesses,
+      suggestedAnswers,
+      tips
     };
   }
 

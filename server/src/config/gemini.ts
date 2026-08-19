@@ -9,4 +9,4 @@ const isValidKey =
 
 export const aiClient = isValidKey ? new GoogleGenAI({ apiKey: env.GEMINI_API_KEY }) : null;
 
-export const GEMINI_MODEL = 'gemini-2.5-flash';
+export const GEMINI_MODEL = 'gemini-3.6-flash';

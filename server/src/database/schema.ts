@@ -182,12 +182,14 @@ export function initializeDatabaseSchema() {
   safeAddColumn('interviews', 'resume_id', 'INTEGER');
 
   // Feedback columns
-  safeAddColumn('feedback', 'accuracy_score', 'INTEGER DEFAULT 80');
-  safeAddColumn('feedback', 'vocabulary_score', 'INTEGER DEFAULT 80');
-  safeAddColumn('feedback', 'leadership_score', 'INTEGER DEFAULT 80');
-  safeAddColumn('feedback', 'behavior_score', 'INTEGER DEFAULT 80');
+  safeAddColumn('feedback', 'accuracy_score', 'INTEGER DEFAULT 0');
+  safeAddColumn('feedback', 'vocabulary_score', 'INTEGER DEFAULT 0');
+  safeAddColumn('feedback', 'leadership_score', 'INTEGER DEFAULT 0');
+  safeAddColumn('feedback', 'behavior_score', 'INTEGER DEFAULT 0');
   safeAddColumn('feedback', 'difficulty_level', "TEXT DEFAULT 'Medium'");
-  safeAddColumn('feedback', 'estimated_performance', "TEXT DEFAULT 'Hire'");
+  safeAddColumn('feedback', 'estimated_performance', "TEXT DEFAULT 'Needs Practice'");
+  safeAddColumn('feedback', 'performance_summary', "TEXT DEFAULT ''");
+  safeAddColumn('feedback', 'category_scores_json', "TEXT DEFAULT '{}'");
 
   // Resume columns
   safeAddColumn('resume_analysis', 'matched_skills_json', "TEXT DEFAULT '[]'");
@@ -196,8 +198,14 @@ export function initializeDatabaseSchema() {
   safeAddColumn('resume_analysis', 'keyword_density_json', "TEXT DEFAULT '[]'");
   safeAddColumn('resume_analysis', 'experience_analysis_json', "TEXT DEFAULT '[]'");
   safeAddColumn('resume_analysis', 'education_analysis_json', "TEXT DEFAULT '[]'");
+
   // Answers evaluation columns
   safeAddColumn('answers', 'correctness_score', 'INTEGER DEFAULT 0');
+  safeAddColumn('answers', 'technical_accuracy', 'INTEGER DEFAULT 0');
+  safeAddColumn('answers', 'relevance_score', 'INTEGER DEFAULT 0');
+  safeAddColumn('answers', 'clarity_score', 'INTEGER DEFAULT 0');
+  safeAddColumn('answers', 'depth_score', 'INTEGER DEFAULT 0');
+  safeAddColumn('answers', 'is_answered', 'INTEGER DEFAULT 1');
   safeAddColumn('answers', 'feedback_text', "TEXT DEFAULT ''");
   safeAddColumn('answers', 'strengths_text', "TEXT DEFAULT ''");
   safeAddColumn('answers', 'weaknesses_text', "TEXT DEFAULT ''");

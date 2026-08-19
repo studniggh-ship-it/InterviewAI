@@ -99,7 +99,7 @@ export const RoleSelectPage: React.FC = () => {
               <Briefcase className="w-6 h-6 text-brand-400" /> Configure Your AI Mock Interview
             </h1>
             <p className="text-xs text-slate-400">
-              Customize your target job position, difficulty level, and session duration. Gemini AI will synthesize adaptive questions in real-time.
+              Customize your target job position, difficulty level, and session duration. InterviewAI will synthesize adaptive questions in real-time.
             </p>
           </div>
 

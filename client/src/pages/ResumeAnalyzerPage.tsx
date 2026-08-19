@@ -139,7 +139,7 @@ export const ResumeAnalyzerPage: React.FC = () => {
                   isLoading={isUploading}
                   icon={<Sparkles className="w-4 h-4" />}
                 >
-                  Analyze Resume with Gemini ATS
+                  Analyze Resume with AI ATS
                 </Button>
               </div>
             )}

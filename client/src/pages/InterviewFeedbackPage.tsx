@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, Link, useLocation } from 'react-router-dom';
 import { 
-  Award, 
   CheckCircle2, 
   XCircle, 
   Lightbulb, 
@@ -11,13 +10,10 @@ import {
   BarChart2, 
   UserCheck,
   Sparkles,
-  ShieldAlert,
-  Flame,
-  Brain,
-  MessageSquare,
-  Compass,
-  Smile,
-  Download
+  Download,
+  Layers,
+  FileText,
+  AlertCircle
 } from 'lucide-react';
 import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, Radar } from 'recharts';
 import { apiClient } from '../api/client';
@@ -70,9 +66,9 @@ export const InterviewFeedbackPage: React.FC = () => {
       problem_solving_score: feedback.problemSolvingScore,
       confidence_score: feedback.confidenceScore,
       grammar_score: feedback.grammarScore,
-      vocabulary_score: feedback.vocabularyScore,
-      leadership_score: feedback.leadershipScore || 80,
-      behavior_score: feedback.behaviorScore || 82,
+      vocabulary_score: feedback.vocabularyScore ?? 0,
+      leadership_score: feedback.leadershipScore ?? 0,
+      behavior_score: feedback.behaviorScore ?? 0,
       estimated_performance: feedback.estimatedPerformance,
       strengths: feedback.strengths,
       weaknesses: feedback.weaknesses,
@@ -93,19 +89,22 @@ export const InterviewFeedbackPage: React.FC = () => {
   const getTierColor = (tier: string) => {
     if (tier === 'Strong Hire') return 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
     if (tier === 'Hire') return 'bg-blue-500/20 text-blue-300 border-blue-500/40';
+    if (tier === 'Leaning Hire') return 'bg-sky-500/20 text-sky-300 border-sky-500/40';
     return 'bg-amber-500/20 text-amber-300 border-amber-500/40';
   };
 
   const radarData = feedback ? [
-    { subject: 'Technical', score: feedback.technicalScore || 0, fullMark: 100 },
-    { subject: 'Communication', score: feedback.communicationScore || 0, fullMark: 100 },
-    { subject: 'Problem Solving', score: feedback.problemSolvingScore || 0, fullMark: 100 },
-    { subject: 'Confidence', score: feedback.confidenceScore || 0, fullMark: 100 },
-    { subject: 'Grammar', score: feedback.grammarScore || 0, fullMark: 100 },
-    { subject: 'Vocabulary', score: feedback.vocabularyScore || 0, fullMark: 100 },
-    { subject: 'Leadership', score: feedback.leadershipScore || 80, fullMark: 100 },
-    { subject: 'Behavior', score: feedback.behaviorScore || 82, fullMark: 100 },
+    { subject: 'Technical', score: feedback.technicalScore ?? 0, fullMark: 100 },
+    { subject: 'Communication', score: feedback.communicationScore ?? 0, fullMark: 100 },
+    { subject: 'Problem Solving', score: feedback.problemSolvingScore ?? 0, fullMark: 100 },
+    { subject: 'Confidence', score: feedback.confidenceScore ?? 0, fullMark: 100 },
+    { subject: 'Grammar', score: feedback.grammarScore ?? 0, fullMark: 100 },
+    { subject: 'Vocabulary', score: feedback.vocabularyScore ?? 0, fullMark: 100 },
+    { subject: 'Leadership', score: feedback.leadershipScore ?? 0, fullMark: 100 },
+    { subject: 'Behavior', score: feedback.behaviorScore ?? 0, fullMark: 100 },
   ] : [];
+
+  const categoryEntries = feedback?.categoryScores ? Object.entries(feedback.categoryScores) : [];
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col">
@@ -130,7 +129,7 @@ export const InterviewFeedbackPage: React.FC = () => {
                       <CheckCircle2 className="w-3.5 h-3.5" /> EVALUATION COMPLETED
                     </span>
                     <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full border text-xs font-bold ${getTierColor(feedback.estimatedPerformance)}`}>
-                      <UserCheck className="w-3.5 h-3.5" /> {feedback.estimatedPerformance || 'Hire'}
+                      <UserCheck className="w-3.5 h-3.5" /> {feedback.estimatedPerformance || 'Needs Practice'}
                     </span>
                     <button
                       onClick={handleDownloadPDF}
@@ -142,7 +141,7 @@ export const InterviewFeedbackPage: React.FC = () => {
 
                   <h1 className="text-3xl font-extrabold text-white">AI Interview Feedback Report</h1>
                   <p className="text-xs text-slate-300">
-                    Role: <span className="text-brand-400 font-semibold">{interviewMeta?.role || 'Developer'}</span> • Level: <span className="text-slate-200">{feedback.difficultyLevel || interviewMeta?.difficulty || 'Medium'}</span> • Evaluated via Gemini AI
+                    Role: <span className="text-brand-400 font-semibold">{interviewMeta?.role || 'Developer'}</span> • Level: <span className="text-slate-200">{feedback.difficultyLevel || interviewMeta?.difficulty || 'Medium'}</span> • Evaluated strictly from actual session data
                   </p>
                 </div>
 
@@ -156,6 +155,42 @@ export const InterviewFeedbackPage: React.FC = () => {
                 </div>
               </GlassCard>
 
+              {/* Performance Summary Narrative */}
+              {feedback.performanceSummary && (
+                <GlassCard className="p-6 space-y-2 border-brand-500/20 bg-brand-950/20">
+                  <h3 className="text-xs font-bold text-brand-300 uppercase tracking-wider flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-brand-400" /> Session Performance Summary
+                  </h3>
+                  <p className="text-xs text-slate-200 leading-relaxed">
+                    {feedback.performanceSummary}
+                  </p>
+                </GlassCard>
+              )}
+
+              {/* Assessed Categories Breakdown (Only Real Categories in Session) */}
+              {categoryEntries.length > 0 && (
+                <div className="space-y-2">
+                  <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                    <Layers className="w-4 h-4 text-brand-400" /> Assessed Category Breakdown
+                  </h3>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {categoryEntries.map(([catName, catScore], idx) => (
+                      <GlassCard key={idx} className="p-4 text-center space-y-1">
+                        <div className={`text-2xl font-black ${
+                          catScore >= 75 ? 'text-emerald-400' :
+                          catScore >= 55 ? 'text-amber-400' :
+                          'text-rose-400'
+                        }`}>
+                          {catScore}%
+                        </div>
+                        <div className="text-xs font-bold text-white truncate" title={catName}>{catName}</div>
+                        <div className="text-[10px] text-slate-400">Category Score</div>
+                      </GlassCard>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* 8-Dimension Competency Score Grid */}
               <div className="space-y-2">
                 <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
@@ -168,9 +203,9 @@ export const InterviewFeedbackPage: React.FC = () => {
                     { label: 'Problem Solving', score: feedback.problemSolvingScore, color: 'text-rose-400', desc: 'Analytical reasoning' },
                     { label: 'Confidence', score: feedback.confidenceScore, color: 'text-amber-400', desc: 'Poise & conviction' },
                     { label: 'Grammar', score: feedback.grammarScore, color: 'text-purple-400', desc: 'Sentence structure' },
-                    { label: 'Vocabulary', score: feedback.vocabularyScore, color: 'text-sky-400', desc: 'Domain terminology' },
-                    { label: 'Leadership', score: feedback.leadershipScore || 80, color: 'text-emerald-400', desc: 'Ownership & initiative' },
-                    { label: 'Behavior & Fit', score: feedback.behaviorScore || 82, color: 'text-teal-400', desc: 'Culture & emotional IQ' },
+                    { label: 'Vocabulary', score: feedback.vocabularyScore ?? 0, color: 'text-sky-400', desc: 'Domain terminology' },
+                    { label: 'Leadership', score: feedback.leadershipScore ?? 0, color: 'text-emerald-400', desc: 'Ownership & initiative' },
+                    { label: 'Behavior & Fit', score: feedback.behaviorScore ?? 0, color: 'text-teal-400', desc: 'Culture & emotional IQ' },
                   ].map((item, idx) => (
                     <GlassCard key={idx} className="p-4 text-center space-y-1">
                       <div className={`text-2xl font-black ${item.color}`}>{item.score}%</div>
@@ -205,12 +240,16 @@ export const InterviewFeedbackPage: React.FC = () => {
                     <CheckCircle2 className="w-4 h-4" /> Key Candidate Strengths
                   </h3>
                   <ul className="space-y-2.5">
-                    {feedback.strengths.map((str, idx) => (
-                      <li key={idx} className="text-xs text-slate-300 flex items-start gap-2.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mt-1.5 shrink-0" />
-                        <span className="leading-relaxed">{str}</span>
-                      </li>
-                    ))}
+                    {feedback.strengths && feedback.strengths.length > 0 ? (
+                      feedback.strengths.map((str, idx) => (
+                        <li key={idx} className="text-xs text-slate-300 flex items-start gap-2.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mt-1.5 shrink-0" />
+                          <span className="leading-relaxed">{str}</span>
+                        </li>
+                      ))
+                    ) : (
+                      <li className="text-xs text-slate-400 italic">Not enough data to evaluate strengths.</li>
+                    )}
                   </ul>
                 </GlassCard>
 
@@ -220,12 +259,16 @@ export const InterviewFeedbackPage: React.FC = () => {
                     <XCircle className="w-4 h-4" /> Areas for Improvement
                   </h3>
                   <ul className="space-y-2.5">
-                    {feedback.weaknesses.map((weak, idx) => (
-                      <li key={idx} className="text-xs text-slate-300 flex items-start gap-2.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 mt-1.5 shrink-0" />
-                        <span className="leading-relaxed">{weak}</span>
-                      </li>
-                    ))}
+                    {feedback.weaknesses && feedback.weaknesses.length > 0 ? (
+                      feedback.weaknesses.map((weak, idx) => (
+                        <li key={idx} className="text-xs text-slate-300 flex items-start gap-2.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 mt-1.5 shrink-0" />
+                          <span className="leading-relaxed">{weak}</span>
+                        </li>
+                      ))
+                    ) : (
+                      <li className="text-xs text-slate-400 italic">No significant weakness patterns identified.</li>
+                    )}
                   </ul>
                 </GlassCard>
               </div>
@@ -259,7 +302,11 @@ export const InterviewFeedbackPage: React.FC = () => {
                       const matchedQA = qaPairs.find(
                         (q) => q.question_index === item.questionIndex || q.question_text === item.question
                       );
-                      const qScore = matchedQA?.correctness_score ? matchedQA.correctness_score : Math.round(feedback.overallScore);
+                      const qScore = item.score !== undefined 
+                        ? item.score 
+                        : (matchedQA?.correctness_score ?? 0);
+                      const isUnanswered = item.isAnswered === false || (matchedQA && matchedQA.is_answered === 0);
+
                       return (
                         <div key={idx} className="p-5 rounded-2xl bg-slate-900/60 border border-white/10 space-y-4">
                           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -272,64 +319,75 @@ export const InterviewFeedbackPage: React.FC = () => {
                               </h4>
                             </div>
                             <div className="flex items-center gap-2">
-                              {matchedQA?.category && (
+                              {(item.category || matchedQA?.category) && (
                                 <span className="px-2 py-0.5 rounded-full bg-slate-800 border border-white/10 text-slate-300 text-[10px] font-semibold">
-                                  {matchedQA.category}
+                                  {item.category || matchedQA?.category}
                                 </span>
                               )}
                               <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
-                                qScore >= 80 ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' :
-                                qScore >= 60 ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' :
+                                isUnanswered ? 'bg-red-500/20 text-red-300 border border-red-500/30' :
+                                qScore >= 75 ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' :
+                                qScore >= 50 ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' :
                                 'bg-red-500/20 text-red-300 border border-red-500/30'
                               }`}>
-                                Score: {qScore}%
+                                {isUnanswered ? 'Skipped / Unanswered (0%)' : `Score: ${qScore}%`}
                               </span>
                             </div>
                           </div>
 
-                          {/* Candidate Answer */}
-                          {matchedQA && (
-                            <div className="p-3.5 rounded-xl bg-slate-800/60 border border-white/5 space-y-1.5">
-                              <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex justify-between">
-                                <span>Your Actual Answer:</span>
-                                {matchedQA.time_spent_seconds > 0 && <span>{matchedQA.time_spent_seconds}s response time</span>}
+                          {/* Sub-score Dimensions if answered */}
+                          {!isUnanswered && (item.technicalAccuracy !== undefined || matchedQA?.technical_accuracy !== undefined) && (
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                              <div className="p-2 rounded-lg bg-slate-800/40 border border-white/5 text-center">
+                                <div className="text-[10px] text-slate-400 font-medium">Technical Accuracy</div>
+                                <div className="text-xs font-bold text-brand-300">{item.technicalAccuracy ?? matchedQA?.technical_accuracy ?? qScore}%</div>
                               </div>
-                              <p className="text-xs text-slate-300 italic leading-relaxed">
-                                "{matchedQA.answer_text || '(No answer provided)'}"
-                              </p>
+                              <div className="p-2 rounded-lg bg-slate-800/40 border border-white/5 text-center">
+                                <div className="text-[10px] text-slate-400 font-medium">Relevance</div>
+                                <div className="text-xs font-bold text-cyan-300">{item.relevance ?? matchedQA?.relevance_score ?? qScore}%</div>
+                              </div>
+                              <div className="p-2 rounded-lg bg-slate-800/40 border border-white/5 text-center">
+                                <div className="text-[10px] text-slate-400 font-medium">Clarity</div>
+                                <div className="text-xs font-bold text-purple-300">{item.clarity ?? matchedQA?.clarity_score ?? qScore}%</div>
+                              </div>
+                              <div className="p-2 rounded-lg bg-slate-800/40 border border-white/5 text-center">
+                                <div className="text-[10px] text-slate-400 font-medium">Technical Depth</div>
+                                <div className="text-xs font-bold text-rose-300">{item.depth ?? matchedQA?.depth_score ?? qScore}%</div>
+                              </div>
                             </div>
                           )}
+
+                          {/* Candidate Answer */}
+                          <div className="p-3.5 rounded-xl bg-slate-800/60 border border-white/5 space-y-1.5">
+                            <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex justify-between">
+                              <span>Your Actual Answer:</span>
+                              {matchedQA?.time_spent_seconds > 0 && <span>{matchedQA.time_spent_seconds}s response time</span>}
+                            </div>
+                            <p className={`text-xs leading-relaxed ${isUnanswered ? 'text-amber-400/90 italic' : 'text-slate-200'}`}>
+                              "{item.candidateAnswer || matchedQA?.answer_text || '(No answer provided)'}"
+                            </p>
+                          </div>
 
                           {/* AI Understanding & Feedback */}
-                          {matchedQA?.ai_understanding && (
+                          {(item.aiUnderstanding || matchedQA?.ai_understanding) && (
                             <div className="p-3.5 rounded-xl bg-indigo-950/20 border border-indigo-500/20 space-y-1 text-xs text-indigo-200">
                               <div className="text-[10px] font-bold uppercase tracking-wider text-indigo-400">AI Understanding:</div>
-                              <p>{matchedQA.ai_understanding}</p>
+                              <p>{item.aiUnderstanding || matchedQA?.ai_understanding}</p>
                             </div>
                           )}
 
-                          {/* Strengths & Weaknesses if recorded */}
-                          {(matchedQA?.strengths_text || matchedQA?.weaknesses_text) && (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                              {matchedQA?.strengths_text && (
-                                <div className="p-3 rounded-xl bg-emerald-950/20 border border-emerald-500/20 text-emerald-300 space-y-1">
-                                  <div className="text-[10px] font-bold uppercase text-emerald-400">Strengths in Answer:</div>
-                                  <p>{matchedQA.strengths_text}</p>
-                                </div>
-                              )}
-                              {matchedQA?.weaknesses_text && (
-                                <div className="p-3 rounded-xl bg-amber-950/20 border border-amber-500/20 text-amber-300 space-y-1">
-                                  <div className="text-[10px] font-bold uppercase text-amber-400">Areas to Improve:</div>
-                                  <p>{matchedQA.weaknesses_text}</p>
-                                </div>
-                              )}
+                          {/* Feedback text if present */}
+                          {(item.feedbackText || matchedQA?.feedback_text) && (
+                            <div className="p-3 rounded-xl bg-slate-800/30 border border-white/5 text-xs text-slate-300 space-y-1">
+                              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Examiner Feedback:</div>
+                              <p>{item.feedbackText || matchedQA?.feedback_text}</p>
                             </div>
                           )}
 
-                          {/* Suggested Model Answer */}
+                          {/* Suggested Improved Answer */}
                           <div className="p-4 rounded-xl bg-emerald-950/30 border border-emerald-500/30 space-y-1.5">
                             <div className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
-                              <Sparkles className="w-3.5 h-3.5" /> Suggested Ideal Answer:
+                              <Sparkles className="w-3.5 h-3.5" /> Suggested Improved Answer:
                             </div>
                             <p className="text-xs text-emerald-200 leading-relaxed">
                               {item.suggestedAnswer}
@@ -339,8 +397,8 @@ export const InterviewFeedbackPage: React.FC = () => {
                       );
                     })
                   ) : (
-                    <div className="text-center py-6 text-slate-400 text-xs">
-                      No question reviews recorded for this session.
+                    <div className="text-center py-6 text-slate-400 text-xs flex items-center justify-center gap-2">
+                      <AlertCircle className="w-4 h-4 text-slate-500" /> Not enough data to evaluate.
                     </div>
                   )}
                 </div>
@@ -374,7 +432,7 @@ export const InterviewFeedbackPage: React.FC = () => {
             </>
           ) : (
             <GlassCard className="p-8 text-center text-slate-400 space-y-4">
-              <p>Feedback report not available for this session.</p>
+              <p>Not enough data to evaluate.</p>
               <Link to="/dashboard">
                 <Button size="sm">Return to Dashboard</Button>
               </Link>

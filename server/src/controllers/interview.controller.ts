@@ -150,6 +150,11 @@ export class InterviewController {
             SET answer_text = ?, 
                 time_spent_seconds = ?,
                 correctness_score = ?,
+                technical_accuracy = ?,
+                relevance_score = ?,
+                clarity_score = ?,
+                depth_score = ?,
+                is_answered = ?,
                 feedback_text = ?,
                 strengths_text = ?,
                 weaknesses_text = ?,
@@ -159,10 +164,15 @@ export class InterviewController {
           `).run(
             finalAnswer, 
             time_spent_seconds || 0,
-            singleEval.correctnessScore,
+            singleEval.score,
+            singleEval.technicalAccuracy,
+            singleEval.relevance,
+            singleEval.clarity,
+            singleEval.depth,
+            singleEval.isAnswered ? 1 : 0,
             singleEval.feedbackText,
-            singleEval.strengths,
-            singleEval.weaknesses,
+            JSON.stringify(singleEval.strengths),
+            JSON.stringify(singleEval.weaknesses),
             singleEval.suggestedAnswer,
             singleEval.aiUnderstanding,
             (existingAns as any).id
@@ -171,18 +181,24 @@ export class InterviewController {
           db.prepare(`
             INSERT INTO answers (
               question_id, interview_id, user_id, answer_text, time_spent_seconds,
-              correctness_score, feedback_text, strengths_text, weaknesses_text, suggested_answer, ai_understanding
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              correctness_score, technical_accuracy, relevance_score, clarity_score, depth_score,
+              is_answered, feedback_text, strengths_text, weaknesses_text, suggested_answer, ai_understanding
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `).run(
             question_id, 
             interviewId, 
             userId, 
             finalAnswer, 
             time_spent_seconds || 0,
-            singleEval.correctnessScore,
+            singleEval.score,
+            singleEval.technicalAccuracy,
+            singleEval.relevance,
+            singleEval.clarity,
+            singleEval.depth,
+            singleEval.isAnswered ? 1 : 0,
             singleEval.feedbackText,
-            singleEval.strengths,
-            singleEval.weaknesses,
+            JSON.stringify(singleEval.strengths),
+            JSON.stringify(singleEval.weaknesses),
             singleEval.suggestedAnswer,
             singleEval.aiUnderstanding
           );
@@ -203,9 +219,9 @@ export class InterviewController {
       let nextQ = db.prepare('SELECT * FROM questions WHERE interview_id = ? AND question_index = ?').get(interviewId, nextIndex) as any;
 
       if (!nextQ) {
-        // Fetch all previous questions and candidate answers for adaptive generation
+        // Fetch all previous questions, categories, and candidate answers for adaptive generation
         const prevQA = db.prepare(`
-          SELECT q.question_text, COALESCE(a.answer_text, '') as answer_text
+          SELECT q.question_text, q.category, COALESCE(a.answer_text, '') as answer_text, COALESCE(a.correctness_score, 0) as correctness_score
           FROM questions q
           LEFT JOIN answers a ON a.question_id = q.id
           WHERE q.interview_id = ?
@@ -213,6 +229,7 @@ export class InterviewController {
         `).all(interviewId) as any[];
 
         const prevQuestions = prevQA.map((q: any) => q.question_text);
+        const prevCategories = prevQA.map((q: any) => q.category);
         const prevAnswers = prevQA.map((q: any) => q.answer_text);
 
         // Fetch resume context if linked
@@ -229,7 +246,7 @@ export class InterviewController {
           }
         }
 
-        // Generate next single question using Gemini with anti-repetition and adaptive difficulty
+        // Generate next single question using Gemini with anti-repetition, category rotation, and adaptive difficulty
         const qRes = await GeminiService.generateQuestion(
           interview.role,
           interview.difficulty,
@@ -237,7 +254,8 @@ export class InterviewController {
           prevQuestions,
           prevAnswers,
           resumeContext,
-          singleEval ? singleEval.correctnessScore : undefined
+          singleEval ? singleEval.correctnessScore : undefined,
+          prevCategories
         );
 
         const qResult = db.prepare(`
@@ -298,7 +316,7 @@ export class InterviewController {
   }
 
   /**
-   * Finalizes the interview, sends all questions and answers to Gemini for evaluation, and saves feedback in SQLite.
+   * Finalizes the interview, evaluates every question answer individually, computes deterministic session metrics, and saves feedback in SQLite.
    */
   static async finishInterview(req: AuthenticatedRequest, res: Response) {
     try {
@@ -310,21 +328,114 @@ export class InterviewController {
         return res.status(404).json({ error: 'Interview session not found' });
       }
 
-      // Fetch all questions and answers for this session
-      const qas = db.prepare(`
-        SELECT q.question_text as question, q.question_index, COALESCE(a.answer_text, '(No answer)') as answer, COALESCE(a.time_spent_seconds, 0) as timeSpentSeconds
+      // Fetch all questions and answers strictly for this session
+      const sessionQAs = db.prepare(`
+        SELECT 
+          q.id as question_id,
+          q.question_index as questionIndex,
+          q.question_text as question,
+          q.category,
+          a.id as answer_id,
+          COALESCE(a.answer_text, '') as answer,
+          COALESCE(a.time_spent_seconds, 0) as timeSpentSeconds,
+          a.correctness_score as correctnessScore,
+          a.technical_accuracy as technicalAccuracy,
+          a.relevance_score as relevanceScore,
+          a.clarity_score as clarityScore,
+          a.depth_score as depthScore,
+          a.is_answered as isAnswered,
+          a.feedback_text as feedbackText,
+          a.strengths_text as strengthsText,
+          a.weaknesses_text as weaknessesText,
+          a.suggested_answer as suggestedAnswer,
+          a.ai_understanding as aiUnderstanding
         FROM questions q
         LEFT JOIN answers a ON a.question_id = q.id
         WHERE q.interview_id = ?
         ORDER BY q.question_index ASC
       `).all(interviewId) as any[];
 
-      if (qas.length === 0) {
+      if (sessionQAs.length === 0) {
         return res.status(400).json({ error: 'No questions found for this interview session' });
       }
 
-      // Generate evaluation via Gemini Service
-      const evalRes = await GeminiService.evaluateInterview(interview.role, interview.difficulty, qas);
+      // Ensure every question has an individual answer evaluation recorded in SQLite
+      for (const item of sessionQAs) {
+        if (item.correctnessScore === null || item.correctnessScore === undefined || !item.suggestedAnswer) {
+          const rawAnswer = item.answer || '';
+          const singleEval = await GeminiService.evaluateSingleAnswer(
+            interview.role,
+            interview.difficulty,
+            item.question,
+            rawAnswer
+          );
+
+          if (item.answer_id) {
+            db.prepare(`
+              UPDATE answers
+              SET correctness_score = ?, technical_accuracy = ?, relevance_score = ?,
+                  clarity_score = ?, depth_score = ?, is_answered = ?,
+                  feedback_text = ?, strengths_text = ?, weaknesses_text = ?,
+                  suggested_answer = ?, ai_understanding = ?
+              WHERE id = ?
+            `).run(
+              singleEval.score,
+              singleEval.technicalAccuracy,
+              singleEval.relevance,
+              singleEval.clarity,
+              singleEval.depth,
+              singleEval.isAnswered ? 1 : 0,
+              singleEval.feedbackText,
+              JSON.stringify(singleEval.strengths),
+              JSON.stringify(singleEval.weaknesses),
+              singleEval.suggestedAnswer,
+              singleEval.aiUnderstanding,
+              item.answer_id
+            );
+          } else {
+            const insRes = db.prepare(`
+              INSERT INTO answers (
+                question_id, interview_id, user_id, answer_text, time_spent_seconds,
+                correctness_score, technical_accuracy, relevance_score, clarity_score, depth_score,
+                is_answered, feedback_text, strengths_text, weaknesses_text, suggested_answer, ai_understanding
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `).run(
+              item.question_id,
+              interviewId,
+              userId,
+              rawAnswer || '(No answer provided / Skipped)',
+              item.timeSpentSeconds || 0,
+              singleEval.score,
+              singleEval.technicalAccuracy,
+              singleEval.relevance,
+              singleEval.clarity,
+              singleEval.depth,
+              singleEval.isAnswered ? 1 : 0,
+              singleEval.feedbackText,
+              JSON.stringify(singleEval.strengths),
+              JSON.stringify(singleEval.weaknesses),
+              singleEval.suggestedAnswer,
+              singleEval.aiUnderstanding
+            );
+            item.answer_id = Number(insRes.lastInsertRowid);
+          }
+
+          item.correctnessScore = singleEval.score;
+          item.technicalAccuracy = singleEval.technicalAccuracy;
+          item.relevanceScore = singleEval.relevance;
+          item.clarityScore = singleEval.clarity;
+          item.depthScore = singleEval.depth;
+          item.isAnswered = singleEval.isAnswered ? 1 : 0;
+          item.feedbackText = singleEval.feedbackText;
+          item.strengthsText = JSON.stringify(singleEval.strengths);
+          item.weaknessesText = JSON.stringify(singleEval.weaknesses);
+          item.suggestedAnswer = singleEval.suggestedAnswer;
+          item.aiUnderstanding = singleEval.aiUnderstanding;
+        }
+      }
+
+      // Generate deterministic evaluation strictly from actual answer evaluations
+      const evalRes = await GeminiService.evaluateInterview(interview.role, interview.difficulty, sessionQAs);
 
       // Save feedback in database
       const existingFb = db.prepare('SELECT id FROM feedback WHERE interview_id = ?').get(interviewId);
@@ -334,7 +445,8 @@ export class InterviewController {
           SET overall_score = ?, technical_score = ?, communication_score = ?, grammar_score = ?,
               confidence_score = ?, problem_solving_score = ?, accuracy_score = ?, vocabulary_score = ?,
               leadership_score = ?, behavior_score = ?, difficulty_level = ?, estimated_performance = ?,
-              strengths_json = ?, weaknesses_json = ?, suggested_answers_json = ?, tips_json = ?
+              strengths_json = ?, weaknesses_json = ?, suggested_answers_json = ?, tips_json = ?,
+              performance_summary = ?, category_scores_json = ?
           WHERE interview_id = ?
         `).run(
           evalRes.overallScore,
@@ -353,6 +465,8 @@ export class InterviewController {
           JSON.stringify(evalRes.weaknesses),
           JSON.stringify(evalRes.suggestedAnswers),
           JSON.stringify(evalRes.tips),
+          evalRes.performanceSummary,
+          JSON.stringify(evalRes.categoryScores),
           interviewId
         );
       } else {
@@ -361,8 +475,9 @@ export class InterviewController {
             interview_id, overall_score, technical_score, communication_score, grammar_score,
             confidence_score, problem_solving_score, accuracy_score, vocabulary_score,
             leadership_score, behavior_score, difficulty_level, estimated_performance,
-            strengths_json, weaknesses_json, suggested_answers_json, tips_json
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            strengths_json, weaknesses_json, suggested_answers_json, tips_json,
+            performance_summary, category_scores_json
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           interviewId,
           evalRes.overallScore,
@@ -380,7 +495,9 @@ export class InterviewController {
           JSON.stringify(evalRes.strengths),
           JSON.stringify(evalRes.weaknesses),
           JSON.stringify(evalRes.suggestedAnswers),
-          JSON.stringify(evalRes.tips)
+          JSON.stringify(evalRes.tips),
+          evalRes.performanceSummary,
+          JSON.stringify(evalRes.categoryScores)
         );
       }
 
@@ -417,7 +534,7 @@ export class InterviewController {
   }
 
   /**
-   * Retrieves evaluated feedback details for an interview.
+   * Retrieves evaluated feedback details for an interview with strict user & session isolation.
    */
   static async getFeedback(req: AuthenticatedRequest, res: Response) {
     try {
@@ -436,15 +553,21 @@ export class InterviewController {
 
       const questionsAnswers = db.prepare(`
         SELECT 
+          q.id as question_id,
           q.question_text, 
           q.question_index, 
           q.category, 
-          COALESCE(a.answer_text, '(No answer)') as answer_text, 
+          COALESCE(a.answer_text, '(No answer provided)') as answer_text, 
           COALESCE(a.time_spent_seconds, 0) as time_spent_seconds,
           COALESCE(a.correctness_score, 0) as correctness_score,
+          COALESCE(a.technical_accuracy, 0) as technical_accuracy,
+          COALESCE(a.relevance_score, 0) as relevance_score,
+          COALESCE(a.clarity_score, 0) as clarity_score,
+          COALESCE(a.depth_score, 0) as depth_score,
+          COALESCE(a.is_answered, 0) as is_answered,
           COALESCE(a.feedback_text, '') as feedback_text,
-          COALESCE(a.strengths_text, '') as strengths_text,
-          COALESCE(a.weaknesses_text, '') as weaknesses_text,
+          COALESCE(a.strengths_text, '[]') as strengths_text,
+          COALESCE(a.weaknesses_text, '[]') as weaknesses_text,
           COALESCE(a.suggested_answer, '') as suggested_answer,
           COALESCE(a.ai_understanding, '') as ai_understanding
         FROM questions q
@@ -463,12 +586,14 @@ export class InterviewController {
           confidenceScore: fb.confidence_score,
           problemSolvingScore: fb.problem_solving_score,
           grammarScore: fb.grammar_score,
-          vocabularyScore: fb.vocabulary_score || fb.communication_score,
-          leadershipScore: fb.leadership_score || 80,
-          behaviorScore: fb.behavior_score || 82,
+          vocabularyScore: fb.vocabulary_score || 0,
+          leadershipScore: fb.leadership_score || 0,
+          behaviorScore: fb.behavior_score || 0,
           accuracyScore: fb.accuracy_score || fb.technical_score,
           difficultyLevel: fb.difficulty_level || interview.difficulty,
-          estimatedPerformance: fb.estimated_performance || (fb.overall_score >= 85 ? 'Strong Hire' : fb.overall_score >= 70 ? 'Hire' : 'Needs Practice'),
+          estimatedPerformance: fb.estimated_performance || (fb.overall_score >= 85 ? 'Strong Hire' : fb.overall_score >= 70 ? 'Hire' : fb.overall_score >= 55 ? 'Leaning Hire' : 'Needs Practice'),
+          performanceSummary: fb.performance_summary || '',
+          categoryScores: JSON.parse(fb.category_scores_json || '{}'),
           strengths: JSON.parse(fb.strengths_json || '[]'),
           weaknesses: JSON.parse(fb.weaknesses_json || '[]'),
           suggestedAnswers: JSON.parse(fb.suggested_answers_json || '[]'),
@@ -477,6 +602,7 @@ export class InterviewController {
         }
       });
     } catch (error) {
+      console.error('Get feedback error:', error);
       return res.status(500).json({ error: 'Failed to retrieve feedback report' });
     }
   }
